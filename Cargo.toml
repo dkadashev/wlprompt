@@ -1,0 +1,11 @@
+[package]
+name = "wlprompt"
+version = "0.1.0"
+edition = "2024"
+description = "Wayland prompt that allows to start apps, with history and tab completion"
+license = "GPL-3.0-or-later"
+keywords = ["wayland", "launcher"]
+
+[dependencies]
+wayland-client = "0.31.12"
+smithay-client-toolkit  = "0.20"
