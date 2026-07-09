@@ -37,7 +37,7 @@ pub struct Config {
 // LATER: replace with something appropriate
 // LATER: change the `expect()`s to error forwarding (using `anyhow`?)
 // For now this just shows a grey bar at the top of the screen
-pub fn run_ui(cfg: Config) {
+pub fn run_ui(cfg: &Config) {
     // Create a Wayland connection by connecting to the server through the
     // environment-provided configuration. See https://wayland-book.com/wayland-display.html
     let conn = Connection::connect_to_env().expect("failed to establish wayland connection");
@@ -98,24 +98,24 @@ struct GuiState {
 }
 
 impl GuiState {
-    pub fn new(cfg: Config, globals: &GlobalList, qh: &QueueHandle<GuiState>) -> GuiState {
-        let shm = Shm::bind(&globals, &qh).expect("wl_shm is not available");
+    pub fn new(cfg: &Config, globals: &GlobalList, qh: &QueueHandle<GuiState>) -> GuiState {
+        let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
         // The initial pool size is 1MB, should be enough even for 4K displays, but if it's not then
         // the pool will be automatically resized
-        let pool = SlotPool::new(1 * 1024 * 1024, &shm).expect("failed to create a mem pool");
+        let pool = SlotPool::new(1024 * 1024, &shm).expect("failed to create a mem pool");
 
         GuiState {
-            seat_state: seat::SeatState::new(&globals, &qh),
-            output_state: output::OutputState::new(&globals, &qh),
-            shm: shm,
-            pool: pool,
+            seat_state: seat::SeatState::new(globals, qh),
+            output_state: output::OutputState::new(globals, qh),
+            shm,
+            pool,
 
             surface_properties: SurfaceProperties {
                 height: cfg.height,
                 bg_color: cfg.bg_color,
                 ..Default::default()
             },
-            surface: prepare_surface(&globals, &qh),
+            surface: prepare_surface(globals, qh),
             keyboard: None,
 
             done: false,
@@ -130,9 +130,9 @@ impl GuiState {
         let (buffer, canvas) = self
             .pool
             .create_buffer(
-                width as i32,
-                height as i32,
-                width as i32 * 4, // stride, 4 bytes per pixel, hence multiply by 4
+                width.cast_signed(),
+                height.cast_signed(),
+                width.cast_signed() * 4, // stride, 4 bytes per pixel, hence multiply by 4
                 wl_shm::Format::Argb8888,
             )
             .expect("failed to get a buffer from the pool");
@@ -143,7 +143,7 @@ impl GuiState {
 
         self.surface
             .wl_surface()
-            .damage_buffer(0, 0, width as i32, height as i32);
+            .damage_buffer(0, 0, width.cast_signed(), height.cast_signed());
 
         buffer
             .attach_to(self.surface.wl_surface())
@@ -163,7 +163,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for GuiState {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        trace!(event:?; "WlRegistry event")
+        trace!(event:?; "WlRegistry event");
     }
 }
 
@@ -177,7 +177,7 @@ impl CompositorHandler for GuiState {
         new_factor: i32,
     ) {
         trace!(new_factor; "CompositorHandler::scale_factor_changed");
-        self.surface_properties.scale_factor = new_factor as u32;
+        self.surface_properties.scale_factor = new_factor.cast_unsigned();
         // The surface is double buffered, the following call affects the pending buffer,
         // i.e. the next one that will be drawn with draw(), not the currently active one
         self.surface
@@ -287,7 +287,7 @@ impl LayerShellHandler for GuiState {
     ) {
         trace!(configure:?; "LayerShellHandler::configure");
         if configure.new_size.0 > 0 {
-            self.surface_properties.width = configure.new_size.0
+            self.surface_properties.width = configure.new_size.0;
         }
         // we ignore the height hint, our height is fixed
 
@@ -337,10 +337,10 @@ impl seat::SeatHandler for GuiState {
         capability: seat::Capability,
     ) {
         trace!(seat:?, capability:?; "SeatHandler::remove_capability");
-        if capability == seat::Capability::Keyboard {
-            if let Some(kbd) = self.keyboard.take() {
-                kbd.release();
-            }
+        if capability == seat::Capability::Keyboard
+            && let Some(kbd) = self.keyboard.take()
+        {
+            kbd.release();
         }
     }
 
@@ -429,15 +429,15 @@ delegate_keyboard!(GuiState);
 fn prepare_surface(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> LayerSurface {
     // Bind wl_compositor, the thing that will hand us a surface to use.
     // See https://wayland-book.com/surfaces/compositor.html
-    let compositor = CompositorState::bind(&globals, &qh).expect("wl_compositor is not available");
+    let compositor = CompositorState::bind(globals, qh).expect("wl_compositor is not available");
     // Bind zwlr_layer_shell (rather than xdg_shell), since our window is supposed to be on top of
     // everything and capturing all input, rather than a normal desktop window. See
     // https://docs.rs/smithay-client-toolkit/latest/smithay_client_toolkit/shell/index.html
-    let layer_shell = LayerShell::bind(&globals, &qh).expect("zwlr_layer_shell is not available");
+    let layer_shell = LayerShell::bind(globals, qh).expect("zwlr_layer_shell is not available");
 
     let surface = layer_shell.create_layer_surface(
-        &qh,
-        compositor.create_surface(&qh),
+        qh,
+        compositor.create_surface(qh),
         Layer::Top,
         Some("wlprompt"),
         None,

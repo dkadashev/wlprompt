@@ -6,5 +6,5 @@ pub fn run() {
         bg_color: [0x20, 0x20, 0x20, 0xff],
         height: 25,
     };
-    gui::wayland::run_ui(ui_config);
+    gui::wayland::run_ui(&ui_config);
 }
