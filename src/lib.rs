@@ -2,5 +2,9 @@
 mod gui;
 
 pub fn run() {
-    gui::wayland::run_test_ui();
+    let ui_config = gui::wayland::Config {
+        bg_color: [0x20, 0x20, 0x20, 0xff],
+        height: 25,
+    };
+    gui::wayland::run_ui(ui_config);
 }

@@ -23,10 +23,21 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_surface},
 };
 
+pub struct Config {
+    // ARGB8888 format, little-endian, so actually BGRA, see
+    // * https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_shm-enum-format,
+    // * drm_fourcc.h in the Linux kernel tree
+    // * https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/pixfmt-rgb.html#bits-per-component
+    // The last one might seem irrelevant, since it's about V4L, but note that it says that the
+    // layout with AR24 code is BGRA.
+    pub bg_color: [u8; 4],
+    pub height: u32,
+}
+
 // LATER: replace with something appropriate
 // LATER: change the `expect()`s to error forwarding (using `anyhow`?)
 // For now this just shows a grey bar at the top of the screen
-pub fn run_test_ui() {
+pub fn run_ui(cfg: Config) {
     // Create a Wayland connection by connecting to the server through the
     // environment-provided configuration. See https://wayland-book.com/wayland-display.html
     let conn = Connection::connect_to_env().expect("failed to establish wayland connection");
@@ -45,7 +56,7 @@ pub fn run_test_ui() {
         .insert(event_loop.handle())
         .expect("failed to insert wayland event source into the event loop");
 
-    let mut state = GuiState::new(&globals, &qh);
+    let mut state = GuiState::new(cfg, &globals, &qh);
 
     println!("Press any key to exit");
     while !state.done {
@@ -55,18 +66,20 @@ pub fn run_test_ui() {
     }
 }
 
-struct SurfaceGeometry {
+struct SurfaceProperties {
     width: u32,
     height: u32,
     scale_factor: u32,
+    bg_color: [u8; 4],
 }
 
-impl Default for SurfaceGeometry {
-    fn default() -> SurfaceGeometry {
-        SurfaceGeometry {
+impl Default for SurfaceProperties {
+    fn default() -> SurfaceProperties {
+        SurfaceProperties {
             width: 512,
             height: 25,
             scale_factor: 1,
+            bg_color: [0, 0, 0, 0],
         }
     }
 }
@@ -77,7 +90,7 @@ struct GuiState {
     shm: Shm,
     pool: SlotPool,
 
-    surface_geometry: SurfaceGeometry,
+    surface_properties: SurfaceProperties,
     surface: LayerSurface,
     keyboard: Option<wl_keyboard::WlKeyboard>,
 
@@ -85,7 +98,7 @@ struct GuiState {
 }
 
 impl GuiState {
-    pub fn new(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> GuiState {
+    pub fn new(cfg: Config, globals: &GlobalList, qh: &QueueHandle<GuiState>) -> GuiState {
         let shm = Shm::bind(&globals, &qh).expect("wl_shm is not available");
         // The initial pool size is 1MB, should be enough even for 4K displays, but if it's not then
         // the pool will be automatically resized
@@ -97,7 +110,11 @@ impl GuiState {
             shm: shm,
             pool: pool,
 
-            surface_geometry: Default::default(),
+            surface_properties: SurfaceProperties {
+                height: cfg.height,
+                bg_color: cfg.bg_color,
+                ..Default::default()
+            },
             surface: prepare_surface(&globals, &qh),
             keyboard: None,
 
@@ -107,8 +124,8 @@ impl GuiState {
 
     pub fn draw(&mut self, _qh: &QueueHandle<Self>) {
         trace!("GuiState::draw()");
-        let width = self.surface_geometry.width * self.surface_geometry.scale_factor;
-        let height = self.surface_geometry.height * self.surface_geometry.scale_factor;
+        let width = self.surface_properties.width * self.surface_properties.scale_factor;
+        let height = self.surface_properties.height * self.surface_properties.scale_factor;
 
         let (buffer, canvas) = self
             .pool
@@ -121,7 +138,7 @@ impl GuiState {
             .expect("failed to get a buffer from the pool");
 
         for px in canvas.chunks_exact_mut(4) {
-            px.copy_from_slice(&[0xa0, 0xa0, 0xa0, 0xff]);
+            px.copy_from_slice(&self.surface_properties.bg_color);
         }
 
         self.surface
@@ -160,11 +177,11 @@ impl CompositorHandler for GuiState {
         new_factor: i32,
     ) {
         trace!(new_factor; "CompositorHandler::scale_factor_changed");
-        self.surface_geometry.scale_factor = new_factor as u32;
+        self.surface_properties.scale_factor = new_factor as u32;
         // The surface is double buffered, the following call affects the pending buffer,
         // i.e. the next one that will be drawn with draw(), not the currently active one
         self.surface
-            .set_buffer_scale(self.surface_geometry.scale_factor)
+            .set_buffer_scale(self.surface_properties.scale_factor)
             .expect("failed to set buffer scale");
     }
 
@@ -270,7 +287,7 @@ impl LayerShellHandler for GuiState {
     ) {
         trace!(configure:?; "LayerShellHandler::configure");
         if configure.new_size.0 > 0 {
-            self.surface_geometry.width = configure.new_size.0
+            self.surface_properties.width = configure.new_size.0
         }
         // we ignore the height hint, our height is fixed
 
