@@ -1,4 +1,5 @@
 // SPDX-License-Identifier:  GPL-3.0-or-later
+use log::trace;
 use std::time::Duration;
 
 use smithay_client_toolkit::{
@@ -105,6 +106,7 @@ impl GuiState {
     }
 
     pub fn draw(&mut self, _qh: &QueueHandle<Self>) {
+        trace!("GuiState::draw()");
         let width = self.surface_geometry.width * self.surface_geometry.scale_factor;
         let height = self.surface_geometry.height * self.surface_geometry.scale_factor;
 
@@ -138,12 +140,13 @@ impl GuiState {
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for GuiState {
     fn event(
         _state: &mut Self,
-        _: &wl_registry::WlRegistry,
-        _: wl_registry::Event,
-        _: &GlobalListContents,
-        _: &Connection,
-        _: &QueueHandle<GuiState>,
+        _proxy: &wl_registry::WlRegistry,
+        event: <wl_registry::WlRegistry as wayland_client::Proxy>::Event,
+        _data: &GlobalListContents,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
     ) {
+        trace!(event:?; "WlRegistry event")
     }
 }
 
@@ -156,6 +159,7 @@ impl CompositorHandler for GuiState {
         _surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
+        trace!(new_factor; "CompositorHandler::scale_factor_changed");
         self.surface_geometry.scale_factor = new_factor as u32;
         // The surface is double buffered, the following call affects the pending buffer,
         // i.e. the next one that will be drawn with draw(), not the currently active one
@@ -168,9 +172,10 @@ impl CompositorHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _time: u32,
+        surface: &wl_surface::WlSurface,
+        time: u32,
     ) {
+        trace!(surface:?, time; "CompositorHandler::frame");
         // We do not request frame callbacks (since the only reason to redraw the screen for us is
         // if the rendered text is changed, which can only happen when user pressed some button), so
         // we do not do anything even if we received one (but this should not happen)
@@ -178,29 +183,31 @@ impl CompositorHandler for GuiState {
 
     fn transform_changed(
         &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: wl_output::Transform,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _new_transform: wl_output::Transform,
     ) {
     }
 
     fn surface_enter(
         &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: &wl_output::WlOutput,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
     ) {
+        trace!(surface:?; "CompositorHandler::surface_enter");
     }
 
     fn surface_leave(
         &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: &wl_output::WlOutput,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
     ) {
+        trace!(surface:?; "CompositorHandler::surface_leave");
     }
 }
 
@@ -213,24 +220,27 @@ impl output::OutputHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        trace!(output:?; "OutputHandler::new_output");
     }
 
     fn update_output(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        trace!(output:?; "OutputHandler::update_output");
     }
 
     fn output_destroyed(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        trace!(output:?; "OutputHandler::output_destroyed");
     }
 }
 delegate_compositor!(GuiState);
@@ -246,6 +256,7 @@ delegate_shm!(GuiState);
 // Necessary for delegate_layer
 impl LayerShellHandler for GuiState {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
+        trace!("LayerShellHandler::closed");
         self.done = true;
     }
 
@@ -257,6 +268,7 @@ impl LayerShellHandler for GuiState {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
+        trace!(configure:?; "LayerShellHandler::configure");
         if configure.new_size.0 > 0 {
             self.surface_geometry.width = configure.new_size.0
         }
@@ -278,7 +290,9 @@ impl seat::SeatHandler for GuiState {
         &mut self.seat_state
     }
 
-    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        trace!(seat:?; "SeatHandler::new_seat");
+    }
 
     fn new_capability(
         &mut self,
@@ -287,6 +301,7 @@ impl seat::SeatHandler for GuiState {
         seat: wl_seat::WlSeat,
         capability: seat::Capability,
     ) {
+        trace!(seat:?, capability:?; "SeatHandler::new_capability");
         if capability == seat::Capability::Keyboard && self.keyboard.is_none() {
             // LATER: use get_keyboard_with_repeat()
             let keyboard = self
@@ -301,9 +316,10 @@ impl seat::SeatHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _seat: wl_seat::WlSeat,
+        seat: wl_seat::WlSeat,
         capability: seat::Capability,
     ) {
+        trace!(seat:?, capability:?; "SeatHandler::remove_capability");
         if capability == seat::Capability::Keyboard {
             if let Some(kbd) = self.keyboard.take() {
                 kbd.release();
@@ -311,7 +327,8 @@ impl seat::SeatHandler for GuiState {
         }
     }
 
-    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        trace!(seat:?; "SeatHandler::remove_seat");
     }
 }
 
@@ -322,32 +339,35 @@ impl keyboard::KeyboardHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
         _raw: &[u32],
-        _keysyms: &[keyboard::Keysym],
+        keysyms: &[keyboard::Keysym],
     ) {
+        trace!(keyboard:?, keysyms:?; "KeyboardHandler::enter");
     }
 
     fn leave(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        trace!(keyboard:?; "KeyboardHandler::leave");
     }
 
     fn press_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: keyboard::KeyEvent,
+        event: keyboard::KeyEvent,
     ) {
+        trace!(keyboard:?, event:?; "KeyboardHandler::press_key");
         self.done = true;
     }
 
@@ -355,32 +375,35 @@ impl keyboard::KeyboardHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: keyboard::KeyEvent,
+        event: keyboard::KeyEvent,
     ) {
+        trace!(keyboard:?, event:?; "KeyboardHandler::repeat_key");
     }
 
     fn release_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: keyboard::KeyEvent,
+        event: keyboard::KeyEvent,
     ) {
+        trace!(keyboard:?, event:?; "KeyboardHandler::release_key");
     }
 
     fn update_modifiers(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _keyboard: &wl_keyboard::WlKeyboard,
+        keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _modifiers: keyboard::Modifiers,
+        modifiers: keyboard::Modifiers,
         _raw_modifiers: keyboard::RawModifiers,
         _layout: u32,
     ) {
+        trace!(keyboard:?, modifiers:?; "KeyboardHandler::update_modifiers");
     }
 }
 
