@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_layer, delegate_output, delegate_shm, output,
+    delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_seat,
+    delegate_shm, output,
     reexports::{calloop, calloop_wayland_source},
+    seat::{self, keyboard},
     shell::{
         WaylandSurface,
         wlr_layer::{
@@ -17,12 +19,11 @@ use smithay_client_toolkit::{
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
     globals::{GlobalList, GlobalListContents, registry_queue_init},
-    protocol::{wl_output, wl_registry, wl_shm, wl_surface},
+    protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_surface},
 };
 
 // LATER: replace with something appropriate
 // LATER: change the `expect()`s to error forwarding (using `anyhow`?)
-// LATER: handle keyboard, exit on any key to start with
 // For now this just shows a grey bar at the top of the screen
 pub fn run_test_ui() {
     // Create a Wayland connection by connecting to the server through the
@@ -45,7 +46,7 @@ pub fn run_test_ui() {
 
     let mut state = GuiState::new(&globals, &qh);
 
-    println!("Hit Ctrl+C to exit");
+    println!("Press any key to exit");
     while !state.done {
         event_loop
             .dispatch(Duration::from_secs(1), &mut state)
@@ -70,12 +71,14 @@ impl Default for SurfaceGeometry {
 }
 
 struct GuiState {
+    seat_state: seat::SeatState,
     output_state: output::OutputState,
     shm: Shm,
     pool: SlotPool,
 
     surface_geometry: SurfaceGeometry,
     surface: LayerSurface,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
 
     done: bool,
 }
@@ -88,12 +91,14 @@ impl GuiState {
         let pool = SlotPool::new(1 * 1024 * 1024, &shm).expect("failed to create a mem pool");
 
         GuiState {
+            seat_state: seat::SeatState::new(&globals, &qh),
             output_state: output::OutputState::new(&globals, &qh),
             shm: shm,
             pool: pool,
 
             surface_geometry: Default::default(),
             surface: prepare_surface(&globals, &qh),
+            keyboard: None,
 
             done: false,
         }
@@ -268,6 +273,119 @@ delegate_layer!(GuiState);
 
 delegate_output!(GuiState);
 
+impl seat::SeatHandler for GuiState {
+    fn seat_state(&mut self) -> &mut seat::SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: seat::Capability,
+    ) {
+        if capability == seat::Capability::Keyboard && self.keyboard.is_none() {
+            // LATER: use get_keyboard_with_repeat()
+            let keyboard = self
+                .seat_state
+                .get_keyboard(qh, &seat, None)
+                .expect("failed to create a keyboard handler");
+            self.keyboard = Some(keyboard);
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wl_seat::WlSeat,
+        capability: seat::Capability,
+    ) {
+        if capability == seat::Capability::Keyboard {
+            if let Some(kbd) = self.keyboard.take() {
+                kbd.release();
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {
+    }
+}
+
+delegate_seat!(GuiState);
+
+impl keyboard::KeyboardHandler for GuiState {
+    fn enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+        _raw: &[u32],
+        _keysyms: &[keyboard::Keysym],
+    ) {
+    }
+
+    fn leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+    ) {
+    }
+
+    fn press_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: keyboard::KeyEvent,
+    ) {
+        self.done = true;
+    }
+
+    fn repeat_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: keyboard::KeyEvent,
+    ) {
+    }
+
+    fn release_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: keyboard::KeyEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _modifiers: keyboard::Modifiers,
+        _raw_modifiers: keyboard::RawModifiers,
+        _layout: u32,
+    ) {
+    }
+}
+
+delegate_keyboard!(GuiState);
+
 fn prepare_surface(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> LayerSurface {
     // Bind wl_compositor, the thing that will hand us a surface to use.
     // See https://wayland-book.com/surfaces/compositor.html
@@ -286,9 +404,8 @@ fn prepare_surface(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> LayerSur
     );
 
     surface.set_anchor(Anchor::LEFT | Anchor::TOP | Anchor::RIGHT);
-    // LATER: we actually want Exclusive interactivity to catch all input, but for now keyboard
-    // input is not supported, so reflect that
-    surface.set_keyboard_interactivity(KeyboardInteractivity::None);
+    // Grab all keyboard input while we are active, which fits the nature of the app
+    surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
     // See https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_exclusive_zone
     surface.set_exclusive_zone(-1);
     surface.commit();
