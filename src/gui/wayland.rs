@@ -58,7 +58,7 @@ pub fn run_ui(cfg: &Config) {
 
     let mut state = GuiState::new(cfg, &globals, &qh);
 
-    println!("Press any key to exit");
+    println!("Press Esc to exit");
     while !state.done {
         event_loop
             .dispatch(Duration::from_secs(1), &mut state)
@@ -356,71 +356,73 @@ impl keyboard::KeyboardHandler for GuiState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
         _raw: &[u32],
         keysyms: &[keyboard::Keysym],
     ) {
-        trace!(keyboard:?, keysyms:?; "KeyboardHandler::enter");
+        trace!(kbd:?, keysyms:?; "KeyboardHandler::enter");
     }
 
     fn leave(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
-        trace!(keyboard:?; "KeyboardHandler::leave");
+        trace!(kbd:?; "KeyboardHandler::leave");
     }
 
     fn press_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _serial: u32,
         event: keyboard::KeyEvent,
     ) {
-        trace!(keyboard:?, event:?; "KeyboardHandler::press_key");
-        self.done = true;
+        trace!(kbd:?, event:?; "KeyboardHandler::press_key");
+        if event.keysym == keyboard::Keysym::Escape {
+            self.done = true;
+        }
     }
 
     fn repeat_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _serial: u32,
         event: keyboard::KeyEvent,
     ) {
-        trace!(keyboard:?, event:?; "KeyboardHandler::repeat_key");
+        trace!(kbd:?, event:?; "KeyboardHandler::repeat_key");
     }
 
     fn release_key(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _serial: u32,
         event: keyboard::KeyEvent,
     ) {
-        trace!(keyboard:?, event:?; "KeyboardHandler::release_key");
+        trace!(kbd:?, event:?; "KeyboardHandler::release_key");
     }
 
     fn update_modifiers(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        keyboard: &wl_keyboard::WlKeyboard,
+        kbd: &wl_keyboard::WlKeyboard,
         _serial: u32,
         modifiers: keyboard::Modifiers,
         _raw_modifiers: keyboard::RawModifiers,
         _layout: u32,
     ) {
-        trace!(keyboard:?, modifiers:?; "KeyboardHandler::update_modifiers");
+        trace!(kbd:?, modifiers:?; "KeyboardHandler::update_modifiers");
     }
 }
 
