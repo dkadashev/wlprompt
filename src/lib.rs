@@ -18,6 +18,10 @@ mod gui;
 pub fn run() -> anyhow::Result<()> {
     let ui_config = gui::wayland::Config {
         bg_color: gui::wayland::Rgba::new(0x20, 0x20, 0x20, 0xff),
+        text_color: gui::wayland::Rgba::new(0xa0, 0xa0, 0xa0, 0xff),
+        text_margin: 10,
+        font: "monospace".to_string(),
+        font_size: 12,
         height: 25,
     };
     gui::wayland::run_ui(&ui_config)

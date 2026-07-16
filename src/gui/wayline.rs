@@ -38,6 +38,10 @@ impl Editor {
         }
         self.text.as_ref()
     }
+
+    pub fn current_text(&self) -> &str {
+        self.text.as_ref()
+    }
 }
 
 enum Action<'a> {

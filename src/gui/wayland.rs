@@ -41,6 +41,10 @@ impl Rgba {
 
 pub struct Config {
     pub bg_color: Rgba,
+    pub text_color: Rgba,
+    pub text_margin: u8,
+    pub font: String,
+    pub font_size: u8,
     pub height: u32,
 }
 
@@ -67,7 +71,6 @@ pub fn run_ui(cfg: &Config) -> anyhow::Result<()> {
 
     let mut state = GuiState::new(cfg, &globals, &qh)?;
 
-    println!("Press Esc to exit");
     while !state.done {
         event_loop
             .dispatch(Duration::from_secs(1), &mut state)
@@ -109,9 +112,20 @@ struct GuiState {
     surface: LayerSurface,
     kbd_state: KeyboardState,
 
+    text_color: Rgba,
+    text_margin: u8,
+    base_font_size: u8,
+    text_renderer: super::text_renderer::TextRenderer,
     editor: super::wayline::Editor,
 
     done: bool,
+}
+
+/// "Multiply" a color component by an alpha in 0-255 range. If alpha was in 0-1 range (floating
+/// point) then it'd be just a multiplication, but with 0-255 range we need a few type casts. Just
+/// a trivial helper to avoid converting everything to floating point numbers all the time.
+fn u8_alpha_mul(c: u8, a: u8) -> u8 {
+    u8::try_from(u32::from(c) * u32::from(a) / 255).unwrap()
 }
 
 /// Convert RGBA color into ARGB8888 little-endian format *with premultiplied alpha* expected
@@ -124,13 +138,35 @@ struct GuiState {
 /// The last one might seem irrelevant, since it's about V4L, but note that it says that the
 /// layout with AR24 code is BGRA.
 fn rgba_to_argb_le_premul(rgba: Rgba) -> [u8; 4] {
-    let premul_alpha = |x| u8::try_from(u32::from(x) * u32::from(rgba.a) / 255).unwrap();
     [
-        premul_alpha(rgba.b),
-        premul_alpha(rgba.g),
-        premul_alpha(rgba.r),
+        u8_alpha_mul(rgba.b, rgba.a),
+        u8_alpha_mul(rgba.g, rgba.a),
+        u8_alpha_mul(rgba.r, rgba.a),
         rgba.a,
     ]
+}
+
+/// Apply "additional" alpha to the color.
+fn combine_alpha(rgba: Rgba, alpha: u8) -> Rgba {
+    Rgba::new(rgba.r, rgba.g, rgba.b, u8_alpha_mul(rgba.a, alpha))
+}
+
+/// Overlay one pixel onto another (src-over). Both pixels must be in ARGB8888 little-endian with
+/// premultiplied alpha. The `bg` pixel is updated in place.
+/// See <https://en.wikipedia.org/wiki/Alpha_compositing>.
+fn overlay_pixel(fg: &[u8], bg: &mut [u8]) {
+    assert!(fg.len() == 4);
+    assert!(bg.len() == 4);
+    if fg[3] == 255 {
+        bg.copy_from_slice(fg);
+        return;
+    }
+    bg[0] = fg[0] + u8_alpha_mul(bg[0], 255 - fg[3]);
+    bg[1] = fg[1] + u8_alpha_mul(bg[1], 255 - fg[3]);
+    bg[2] = fg[2] + u8_alpha_mul(bg[2], 255 - fg[3]);
+    bg[3] =
+        u8::try_from(u32::from(fg[3]) + u32::from(bg[3]) - u32::from(u8_alpha_mul(fg[3], bg[3])))
+            .unwrap();
 }
 
 impl GuiState {
@@ -160,6 +196,11 @@ impl GuiState {
                 keyboard: None,
                 modifiers: keyboard::Modifiers::default(),
             },
+
+            text_color: cfg.text_color,
+            text_margin: cfg.text_margin,
+            base_font_size: cfg.font_size,
+            text_renderer: super::text_renderer::TextRenderer::new(&cfg.font)?,
             editor: super::wayline::Editor::new(),
 
             done: false,
@@ -185,6 +226,23 @@ impl GuiState {
             px.copy_from_slice(&self.surface_properties.bg_color);
         }
 
+        let margin = u32::from(self.text_margin);
+        #[allow(clippy::cast_precision_loss)]
+        let font_size =
+            (u32::from(self.base_font_size) * self.surface_properties.scale_factor) as f32;
+        for (x, y, alpha) in self
+            .text_renderer
+            .render(self.editor.current_text(), font_size)
+        {
+            let text_color = rgba_to_argb_le_premul(combine_alpha(self.text_color, alpha));
+            let linear_pos = (((y + margin) * width + x + margin) * 4) as usize;
+            if linear_pos > canvas.len() {
+                // This can happen if the font is too large for the surface, or the text is too long
+                continue;
+            }
+            overlay_pixel(&text_color, &mut canvas[linear_pos..linear_pos + 4]);
+        }
+
         self.surface
             .wl_surface()
             .damage_buffer(0, 0, width.cast_signed(), height.cast_signed());
@@ -195,6 +253,10 @@ impl GuiState {
         self.surface.commit();
     }
 }
+
+// =================================================================================
+// The main logic is above. What follows is pretty much wayland plumbing (and tests)
+// =================================================================================
 
 // Implement `Dispatch<WlRegistry, GlobalListContents> for our state. Necessary for
 // being able to use registry_queue_init()
@@ -440,8 +502,9 @@ impl keyboard::KeyboardHandler for GuiState {
             modifiers: self.kbd_state.modifiers,
             key_event: event,
         };
-        let txt = self.editor.handle_key(&kp);
-        trace!("current text: {txt}");
+        self.editor.handle_key(&kp);
+        // LATER: we do not need to re-draw on every key press, only if something changed
+        self.draw();
     }
 
     fn repeat_key(
