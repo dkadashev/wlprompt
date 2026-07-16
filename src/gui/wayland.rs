@@ -99,6 +99,8 @@ struct GuiState {
     surface: LayerSurface,
     kbd_state: KeyboardState,
 
+    editor: super::wayline::Editor,
+
     done: bool,
 }
 
@@ -125,6 +127,7 @@ impl GuiState {
                 keyboard: None,
                 modifiers: keyboard::Modifiers::default(),
             },
+            editor: super::wayline::Editor::new(),
 
             done: false,
         }
@@ -396,6 +399,12 @@ impl keyboard::KeyboardHandler for GuiState {
         if event.keysym == keyboard::Keysym::Escape {
             self.done = true;
         }
+        let kp = super::wayline::KeyPress {
+            modifiers: self.kbd_state.modifiers,
+            key_event: event,
+        };
+        let txt = self.editor.handle_key(&kp);
+        trace!("current text: {txt}");
     }
 
     fn repeat_key(
