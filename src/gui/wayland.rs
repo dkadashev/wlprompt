@@ -84,6 +84,11 @@ impl Default for SurfaceProperties {
     }
 }
 
+struct KeyboardState {
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    modifiers: keyboard::Modifiers,
+}
+
 struct GuiState {
     seat_state: seat::SeatState,
     output_state: output::OutputState,
@@ -92,7 +97,7 @@ struct GuiState {
 
     surface_properties: SurfaceProperties,
     surface: LayerSurface,
-    keyboard: Option<wl_keyboard::WlKeyboard>,
+    kbd_state: KeyboardState,
 
     done: bool,
 }
@@ -116,7 +121,10 @@ impl GuiState {
                 ..Default::default()
             },
             surface: prepare_surface(globals, qh),
-            keyboard: None,
+            kbd_state: KeyboardState {
+                keyboard: None,
+                modifiers: keyboard::Modifiers::default(),
+            },
 
             done: false,
         }
@@ -319,13 +327,13 @@ impl seat::SeatHandler for GuiState {
         capability: seat::Capability,
     ) {
         trace!(seat:?, capability:?; "SeatHandler::new_capability");
-        if capability == seat::Capability::Keyboard && self.keyboard.is_none() {
+        if capability == seat::Capability::Keyboard && self.kbd_state.keyboard.is_none() {
             // LATER: use get_keyboard_with_repeat()
             let keyboard = self
                 .seat_state
                 .get_keyboard(qh, &seat, None)
                 .expect("failed to create a keyboard handler");
-            self.keyboard = Some(keyboard);
+            self.kbd_state.keyboard = Some(keyboard);
         }
     }
 
@@ -338,7 +346,7 @@ impl seat::SeatHandler for GuiState {
     ) {
         trace!(seat:?, capability:?; "SeatHandler::remove_capability");
         if capability == seat::Capability::Keyboard
-            && let Some(kbd) = self.keyboard.take()
+            && let Some(kbd) = self.kbd_state.keyboard.take()
         {
             kbd.release();
         }
@@ -423,6 +431,7 @@ impl keyboard::KeyboardHandler for GuiState {
         _layout: u32,
     ) {
         trace!(kbd:?, modifiers:?; "KeyboardHandler::update_modifiers");
+        self.kbd_state.modifiers = modifiers;
     }
 }
 
