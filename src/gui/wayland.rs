@@ -2,6 +2,7 @@
 use log::trace;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_seat,
@@ -35,35 +36,35 @@ pub struct Config {
 }
 
 // LATER: replace with something appropriate
-// LATER: change the `expect()`s to error forwarding (using `anyhow`?)
 // For now this just shows a grey bar at the top of the screen
-pub fn run_ui(cfg: &Config) {
+pub fn run_ui(cfg: &Config) -> anyhow::Result<()> {
     // Create a Wayland connection by connecting to the server through the
     // environment-provided configuration. See https://wayland-book.com/wayland-display.html
-    let conn = Connection::connect_to_env().expect("failed to establish wayland connection");
+    let conn = Connection::connect_to_env().context("failed to establish wayland connection")?;
 
     // Make an event queue and retrieve the list of Wayland global objects (see
     // https://wayland-book.com/registry.html)
     let (globals, event_queue) =
-        registry_queue_init::<GuiState>(&conn).expect("failed to init wayland event queue");
+        registry_queue_init::<GuiState>(&conn).context("failed to init wayland event queue")?;
     let qh = event_queue.handle();
 
     // This will be processing all wayland events and sending them to us to handle
     let mut event_loop: calloop::EventLoop<GuiState> =
-        calloop::EventLoop::try_new().expect("failed to initialize an event loop");
+        calloop::EventLoop::try_new().context("failed to initialize an event loop")?;
     // WaylandSource is an adaptor for wayland_client::EventQueue to act as a calloop's event source
     calloop_wayland_source::WaylandSource::new(conn, event_queue)
         .insert(event_loop.handle())
-        .expect("failed to insert wayland event source into the event loop");
+        .context("failed to insert wayland event source into the event loop")?;
 
-    let mut state = GuiState::new(cfg, &globals, &qh);
+    let mut state = GuiState::new(cfg, &globals, &qh)?;
 
     println!("Press Esc to exit");
     while !state.done {
         event_loop
             .dispatch(Duration::from_secs(1), &mut state)
-            .expect("event loop dispatch failed");
+            .context("event loop dispatch failed")?;
     }
+    Ok(())
 }
 
 struct SurfaceProperties {
@@ -105,13 +106,17 @@ struct GuiState {
 }
 
 impl GuiState {
-    pub fn new(cfg: &Config, globals: &GlobalList, qh: &QueueHandle<GuiState>) -> GuiState {
-        let shm = Shm::bind(globals, qh).expect("wl_shm is not available");
+    pub fn new(
+        cfg: &Config,
+        globals: &GlobalList,
+        qh: &QueueHandle<GuiState>,
+    ) -> anyhow::Result<GuiState> {
+        let shm = Shm::bind(globals, qh).context("wl_shm is not available")?;
         // The initial pool size is 1MB, should be enough even for 4K displays, but if it's not then
         // the pool will be automatically resized
-        let pool = SlotPool::new(1024 * 1024, &shm).expect("failed to create a mem pool");
+        let pool = SlotPool::new(1024 * 1024, &shm).context("failed to create a mem pool")?;
 
-        GuiState {
+        Ok(GuiState {
             seat_state: seat::SeatState::new(globals, qh),
             output_state: output::OutputState::new(globals, qh),
             shm,
@@ -122,7 +127,7 @@ impl GuiState {
                 bg_color: cfg.bg_color,
                 ..Default::default()
             },
-            surface: prepare_surface(globals, qh),
+            surface: prepare_surface(globals, qh)?,
             kbd_state: KeyboardState {
                 keyboard: None,
                 modifiers: keyboard::Modifiers::default(),
@@ -130,7 +135,7 @@ impl GuiState {
             editor: super::wayline::Editor::new(),
 
             done: false,
-        }
+        })
     }
 
     pub fn draw(&mut self, _qh: &QueueHandle<Self>) {
@@ -332,6 +337,10 @@ impl seat::SeatHandler for GuiState {
         trace!(seat:?, capability:?; "SeatHandler::new_capability");
         if capability == seat::Capability::Keyboard && self.kbd_state.keyboard.is_none() {
             // LATER: use get_keyboard_with_repeat()
+            // The code below uses 'expect()' rather than e.g. logging a warning, because it's not
+            // supposed to happen and if it DOES happen then we might end up in a situation when
+            // the app/surface can't be closed normally (because it does not get keyboard input), in
+            // this situation it's preferable to blow up right away.
             let keyboard = self
                 .seat_state
                 .get_keyboard(qh, &seat, None)
@@ -446,14 +455,18 @@ impl keyboard::KeyboardHandler for GuiState {
 
 delegate_keyboard!(GuiState);
 
-fn prepare_surface(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> LayerSurface {
+fn prepare_surface(
+    globals: &GlobalList,
+    qh: &QueueHandle<GuiState>,
+) -> anyhow::Result<LayerSurface> {
     // Bind wl_compositor, the thing that will hand us a surface to use.
     // See https://wayland-book.com/surfaces/compositor.html
-    let compositor = CompositorState::bind(globals, qh).expect("wl_compositor is not available");
+    let compositor =
+        CompositorState::bind(globals, qh).context("wl_compositor is not available")?;
     // Bind zwlr_layer_shell (rather than xdg_shell), since our window is supposed to be on top of
     // everything and capturing all input, rather than a normal desktop window. See
     // https://docs.rs/smithay-client-toolkit/latest/smithay_client_toolkit/shell/index.html
-    let layer_shell = LayerShell::bind(globals, qh).expect("zwlr_layer_shell is not available");
+    let layer_shell = LayerShell::bind(globals, qh).context("zwlr_layer_shell is not available")?;
 
     let surface = layer_shell.create_layer_surface(
         qh,
@@ -470,5 +483,5 @@ fn prepare_surface(globals: &GlobalList, qh: &QueueHandle<GuiState>) -> LayerSur
     surface.set_exclusive_zone(-1);
     surface.commit();
 
-    surface
+    Ok(surface)
 }
