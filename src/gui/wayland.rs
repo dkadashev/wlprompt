@@ -138,7 +138,7 @@ impl GuiState {
         })
     }
 
-    pub fn draw(&mut self, _qh: &QueueHandle<Self>) {
+    pub fn draw(&mut self) {
         trace!("GuiState::draw()");
         let width = self.surface_properties.width * self.surface_properties.scale_factor;
         let height = self.surface_properties.height * self.surface_properties.scale_factor;
@@ -296,7 +296,7 @@ impl LayerShellHandler for GuiState {
     fn configure(
         &mut self,
         _conn: &Connection,
-        qh: &QueueHandle<Self>,
+        _qh: &QueueHandle<Self>,
         _layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
@@ -311,7 +311,7 @@ impl LayerShellHandler for GuiState {
         // the surface size has changed. The latter should not really be happening, but hopefully we
         // won't get any/too many `configure` events in that case, so we just re-draw
         // unconditionally.
-        self.draw(qh);
+        self.draw();
     }
 }
 delegate_layer!(GuiState);
