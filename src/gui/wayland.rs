@@ -80,7 +80,7 @@ impl Default for SurfaceProperties {
             width: 512,
             height: 25,
             scale_factor: 1,
-            bg_color: [0, 0, 0, 0],
+            bg_color: [0, 0, 0, 0xff],
         }
     }
 }
