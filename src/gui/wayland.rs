@@ -24,14 +24,23 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_surface},
 };
 
+/// Defines a color in RGBA color model without premultiplied alpha
+#[derive(Copy, Clone)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Rgba {
+    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Rgba { r, g, b, a }
+    }
+}
+
 pub struct Config {
-    // ARGB8888 format, little-endian, so actually BGRA, see
-    // * https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_shm-enum-format,
-    // * drm_fourcc.h in the Linux kernel tree
-    // * https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/pixfmt-rgb.html#bits-per-component
-    // The last one might seem irrelevant, since it's about V4L, but note that it says that the
-    // layout with AR24 code is BGRA.
-    pub bg_color: [u8; 4],
+    pub bg_color: Rgba,
     pub height: u32,
 }
 
@@ -105,6 +114,25 @@ struct GuiState {
     done: bool,
 }
 
+/// Convert RGBA color into ARGB8888 little-endian format *with premultiplied alpha* expected
+/// by DRM / wayland, see
+///
+/// * <https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_shm-enum-format>,
+/// * `drm_fourcc.h` in the Linux kernel tree
+/// * <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/pixfmt-rgb.html#bits-per-component>
+///
+/// The last one might seem irrelevant, since it's about V4L, but note that it says that the
+/// layout with AR24 code is BGRA.
+fn rgba_to_argb_le_premul(rgba: Rgba) -> [u8; 4] {
+    let premul_alpha = |x| u8::try_from(u32::from(x) * u32::from(rgba.a) / 255).unwrap();
+    [
+        premul_alpha(rgba.b),
+        premul_alpha(rgba.g),
+        premul_alpha(rgba.r),
+        rgba.a,
+    ]
+}
+
 impl GuiState {
     pub fn new(
         cfg: &Config,
@@ -124,7 +152,7 @@ impl GuiState {
 
             surface_properties: SurfaceProperties {
                 height: cfg.height,
-                bg_color: cfg.bg_color,
+                bg_color: rgba_to_argb_le_premul(cfg.bg_color),
                 ..Default::default()
             },
             surface: prepare_surface(globals, qh)?,
@@ -484,4 +512,69 @@ fn prepare_surface(
     surface.commit();
 
     Ok(surface)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_opaque_preserves_channels_in_bgra_order() {
+        // With full alpha, premultiplication is a no-op, so this also verifies the output
+        // channel order is [B, G, R, A].
+        let got = rgba_to_argb_le_premul(Rgba::new(1, 2, 3, 0xff));
+        assert_eq!(got, [3, 2, 1, 0xff]);
+    }
+
+    #[test]
+    fn test_fully_transparent_is_all_zero() {
+        // Alpha of 0 premultiplies every color channel down to 0.
+        let got = rgba_to_argb_le_premul(Rgba::new(10, 20, 30, 0));
+        assert_eq!(got, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_opaque_primary_colors() {
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0xff, 0, 0, 0xff)),
+            [0, 0, 0xff, 0xff]
+        );
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0, 0xff, 0, 0xff)),
+            [0, 0xff, 0, 0xff]
+        );
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0, 0, 0xff, 0xff)),
+            [0xff, 0, 0, 0xff]
+        );
+    }
+
+    #[test]
+    fn test_opaque_black_and_white() {
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0, 0, 0, 0xff)),
+            [0, 0, 0, 0xff]
+        );
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 0xff)),
+            [0xff, 0xff, 0xff, 0xff]
+        );
+    }
+
+    #[test]
+    fn test_half_alpha_premultiplication() {
+        // White at 50% alpha: each channel becomes 255 * 128 / 255 == 128.
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 128)),
+            [128, 128, 128, 128]
+        );
+        // Distinct channels at 50% alpha, checking both the math and the BGRA ordering:
+        //   b: 50  * 128 / 255 == 25
+        //   g: 100 * 128 / 255 == 50
+        //   r: 200 * 128 / 255 == 100
+        assert_eq!(
+            rgba_to_argb_le_premul(Rgba::new(200, 100, 50, 128)),
+            [25, 50, 100, 128]
+        );
+    }
 }

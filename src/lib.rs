@@ -17,7 +17,7 @@ mod gui;
 /// practical.
 pub fn run() -> anyhow::Result<()> {
     let ui_config = gui::wayland::Config {
-        bg_color: [0x20, 0x20, 0x20, 0xff],
+        bg_color: gui::wayland::Rgba::new(0x20, 0x20, 0x20, 0xff),
         height: 25,
     };
     gui::wayland::run_ui(&ui_config)
