@@ -1,4 +1,5 @@
 // SPDX-License-Identifier:  GPL-3.0-or-later
+mod app;
 mod gui;
 
 /// Run the app, showing the UI and letting the user to type commands and execute them in a child

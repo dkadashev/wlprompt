@@ -24,6 +24,8 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm, wl_surface},
 };
 
+use crate::app;
+
 /// Defines a color in RGBA color model without premultiplied alpha
 #[derive(Copy, Clone)]
 pub struct Rgba {
@@ -116,7 +118,7 @@ struct GuiState {
     text_margin: u8,
     base_font_size: u8,
     text_renderer: super::text_renderer::TextRenderer,
-    editor: super::wayline::Editor,
+    editor: app::Editor,
 
     done: bool,
 }
@@ -201,7 +203,7 @@ impl GuiState {
             text_margin: cfg.text_margin,
             base_font_size: cfg.font_size,
             text_renderer: super::text_renderer::TextRenderer::new(&cfg.font)?,
-            editor: super::wayline::Editor::new(),
+            editor: app::Editor::new(),
 
             done: false,
         })
@@ -252,6 +254,26 @@ impl GuiState {
             .expect("failed to attach buffer to the surface");
         self.surface.commit();
     }
+}
+
+/// This translates wayland keypress event into the format business logic layer expects. Returns
+/// `None` if the event can't be translated (i.e. business logic layer does not care about it) and
+/// should be ignored.
+fn wayland_key_to_editor_key(
+    modifiers: keyboard::Modifiers,
+    key: &keyboard::KeyEvent,
+) -> Option<app::KeyPress> {
+    key.utf8
+        .as_deref()
+        .and_then(|s| s.chars().next())
+        .map(|ch| app::KeyPress {
+            modifiers: app::Modifiers {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+            },
+            key: app::KeyCode::Char(ch),
+        })
 }
 
 // =================================================================================
@@ -498,13 +520,11 @@ impl keyboard::KeyboardHandler for GuiState {
         if event.keysym == keyboard::Keysym::Escape {
             self.done = true;
         }
-        let kp = super::wayline::KeyPress {
-            modifiers: self.kbd_state.modifiers,
-            key_event: event,
-        };
-        self.editor.handle_key(&kp);
-        // LATER: we do not need to re-draw on every key press, only if something changed
-        self.draw();
+        if let Some(event) = wayland_key_to_editor_key(self.kbd_state.modifiers, &event) {
+            self.editor.handle_key(&event);
+            // LATER: we do not need to re-draw on every key press, only if something changed
+            self.draw();
+        }
     }
 
     fn repeat_key(
@@ -642,6 +662,99 @@ mod tests {
                 rgba_to_argb_le_premul(Rgba::new(200, 100, 50, 128)),
                 [25, 50, 100, 128]
             );
+        }
+    }
+
+    mod wayland_key_to_editor_key {
+        use super::*;
+
+        /// Build a `keyboard::KeyEvent` with the given utf8 payload. The other fields are not used
+        /// by `wayland_key_to_editor_key`, so they get arbitrary values.
+        fn key_event(utf8: Option<&str>) -> keyboard::KeyEvent {
+            keyboard::KeyEvent {
+                utf8: utf8.map(str::to_owned),
+                time: 0,
+                raw_code: 0,
+                keysym: keyboard::Keysym::Tab,
+            }
+        }
+
+        /// Build a `keyboard::Modifiers` with just the three flags we care about set.
+        fn mods(ctrl: bool, alt: bool, shift: bool) -> keyboard::Modifiers {
+            keyboard::Modifiers {
+                ctrl,
+                alt,
+                shift,
+                ..keyboard::Modifiers::default()
+            }
+        }
+
+        #[test]
+        fn test_none_utf8_returns_none() {
+            // Keys without a utf8 representation (arrows, F-keys, ...) can't be translated.
+            let ev = key_event(None);
+            assert!(wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev).is_none());
+        }
+
+        #[test]
+        fn test_empty_utf8_returns_none() {
+            // An empty utf8 string yields no first char, so there is nothing to translate.
+            let ev = key_event(Some(""));
+            assert!(wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev).is_none());
+        }
+
+        #[test]
+        fn test_basic_char_is_translated() {
+            let ev = key_event(Some("a"));
+            let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
+                .expect("expected a translated key");
+            let app::KeyCode::Char(ch) = got.key;
+            assert_eq!(ch, 'a');
+            assert!(!got.modifiers.ctrl);
+            assert!(!got.modifiers.alt);
+            assert!(!got.modifiers.shift);
+        }
+
+        #[test]
+        fn test_all_modifiers_are_copied() {
+            let ev = key_event(Some("x"));
+            let got = wayland_key_to_editor_key(mods(true, true, true), &ev)
+                .expect("expected a translated key");
+            let app::KeyCode::Char(ch) = got.key;
+            assert_eq!(ch, 'x');
+            assert!(got.modifiers.ctrl);
+            assert!(got.modifiers.alt);
+            assert!(got.modifiers.shift);
+        }
+
+        #[test]
+        fn test_modifiers_are_mapped_independently() {
+            // Only shift is set: ctrl and alt must remain unset, ensuring flags aren't confused.
+            let ev = key_event(Some("y"));
+            let got = wayland_key_to_editor_key(mods(false, false, true), &ev)
+                .expect("expected a translated key");
+            assert!(!got.modifiers.ctrl);
+            assert!(!got.modifiers.alt);
+            assert!(got.modifiers.shift);
+        }
+
+        #[test]
+        fn test_only_first_char_is_used() {
+            // A multi-character utf8 payload keeps only the first scalar value.
+            let ev = key_event(Some("abc"));
+            let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
+                .expect("expected a translated key");
+            let app::KeyCode::Char(ch) = got.key;
+            assert_eq!(ch, 'a');
+        }
+
+        #[test]
+        fn test_non_ascii_char_is_preserved() {
+            let ev = key_event(Some("ñ"));
+            let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
+                .expect("expected a translated key");
+            let app::KeyCode::Char(ch) = got.key;
+            assert_eq!(ch, 'ñ');
         }
     }
 }
