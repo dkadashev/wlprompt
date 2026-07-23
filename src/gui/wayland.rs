@@ -276,9 +276,9 @@ fn wayland_key_to_editor_key(
         })
 }
 
-// =================================================================================
+// ---------------------------------------------------------------------------------
 // The main logic is above. What follows is pretty much wayland plumbing (and tests)
-// =================================================================================
+// ---------------------------------------------------------------------------------
 
 // Implement `Dispatch<WlRegistry, GlobalListContents> for our state. Necessary for
 // being able to use registry_queue_init()
