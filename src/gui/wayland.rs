@@ -238,7 +238,7 @@ impl GuiState {
         {
             let text_color = rgba_to_argb_le_premul(combine_alpha(self.text_color, alpha));
             let linear_pos = (((y + margin) * width + x + margin) * 4) as usize;
-            if linear_pos > canvas.len() {
+            if linear_pos + 4 > canvas.len() {
                 // This can happen if the font is too large for the surface, or the text is too long
                 continue;
             }
