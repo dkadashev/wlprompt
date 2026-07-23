@@ -581,63 +581,67 @@ fn prepare_surface(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_opaque_preserves_channels_in_bgra_order() {
-        // With full alpha, premultiplication is a no-op, so this also verifies the output
-        // channel order is [B, G, R, A].
-        let got = rgba_to_argb_le_premul(Rgba::new(1, 2, 3, 0xff));
-        assert_eq!(got, [3, 2, 1, 0xff]);
-    }
+    mod rgba_to_argb_le_premul {
+        use super::*;
 
-    #[test]
-    fn test_fully_transparent_is_all_zero() {
-        // Alpha of 0 premultiplies every color channel down to 0.
-        let got = rgba_to_argb_le_premul(Rgba::new(10, 20, 30, 0));
-        assert_eq!(got, [0, 0, 0, 0]);
-    }
+        #[test]
+        fn test_opaque_preserves_channels_in_bgra_order() {
+            // With full alpha, premultiplication is a no-op, so this also verifies the output
+            // channel order is [B, G, R, A].
+            let got = rgba_to_argb_le_premul(Rgba::new(1, 2, 3, 0xff));
+            assert_eq!(got, [3, 2, 1, 0xff]);
+        }
 
-    #[test]
-    fn test_opaque_primary_colors() {
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0xff, 0, 0, 0xff)),
-            [0, 0, 0xff, 0xff]
-        );
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0, 0xff, 0, 0xff)),
-            [0, 0xff, 0, 0xff]
-        );
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0, 0, 0xff, 0xff)),
-            [0xff, 0, 0, 0xff]
-        );
-    }
+        #[test]
+        fn test_fully_transparent_is_all_zero() {
+            // Alpha of 0 premultiplies every color channel down to 0.
+            let got = rgba_to_argb_le_premul(Rgba::new(10, 20, 30, 0));
+            assert_eq!(got, [0, 0, 0, 0]);
+        }
 
-    #[test]
-    fn test_opaque_black_and_white() {
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0, 0, 0, 0xff)),
-            [0, 0, 0, 0xff]
-        );
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 0xff)),
-            [0xff, 0xff, 0xff, 0xff]
-        );
-    }
+        #[test]
+        fn test_opaque_primary_colors() {
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0xff, 0, 0, 0xff)),
+                [0, 0, 0xff, 0xff]
+            );
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0, 0xff, 0, 0xff)),
+                [0, 0xff, 0, 0xff]
+            );
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0, 0, 0xff, 0xff)),
+                [0xff, 0, 0, 0xff]
+            );
+        }
 
-    #[test]
-    fn test_half_alpha_premultiplication() {
-        // White at 50% alpha: each channel becomes 255 * 128 / 255 == 128.
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 128)),
-            [128, 128, 128, 128]
-        );
-        // Distinct channels at 50% alpha, checking both the math and the BGRA ordering:
-        //   b: 50  * 128 / 255 == 25
-        //   g: 100 * 128 / 255 == 50
-        //   r: 200 * 128 / 255 == 100
-        assert_eq!(
-            rgba_to_argb_le_premul(Rgba::new(200, 100, 50, 128)),
-            [25, 50, 100, 128]
-        );
+        #[test]
+        fn test_opaque_black_and_white() {
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0, 0, 0, 0xff)),
+                [0, 0, 0, 0xff]
+            );
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 0xff)),
+                [0xff, 0xff, 0xff, 0xff]
+            );
+        }
+
+        #[test]
+        fn test_half_alpha_premultiplication() {
+            // White at 50% alpha: each channel becomes 255 * 128 / 255 == 128.
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 128)),
+                [128, 128, 128, 128]
+            );
+            // Distinct channels at 50% alpha, checking both the math and the BGRA ordering:
+            //   b: 50  * 128 / 255 == 25
+            //   g: 100 * 128 / 255 == 50
+            //   r: 200 * 128 / 255 == 100
+            assert_eq!(
+                rgba_to_argb_le_premul(Rgba::new(200, 100, 50, 128)),
+                [25, 50, 100, 128]
+            );
+        }
     }
 }
