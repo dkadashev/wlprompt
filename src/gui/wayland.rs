@@ -263,15 +263,22 @@ fn wayland_key_to_editor_key(
     modifiers: keyboard::Modifiers,
     key: &keyboard::KeyEvent,
 ) -> Option<app::KeyPress> {
+    let app_modifiers = app::Modifiers {
+        ctrl: modifiers.ctrl,
+        alt: modifiers.alt,
+        shift: modifiers.shift,
+    };
+    if key.keysym == keyboard::Keysym::BackSpace {
+        return Some(app::KeyPress {
+            modifiers: app_modifiers,
+            key: app::KeyCode::Backspace,
+        });
+    }
     key.utf8
         .as_deref()
         .and_then(|s| s.chars().next())
         .map(|ch| app::KeyPress {
-            modifiers: app::Modifiers {
-                ctrl: modifiers.ctrl,
-                alt: modifiers.alt,
-                shift: modifiers.shift,
-            },
+            modifiers: app_modifiers,
             key: app::KeyCode::Char(ch),
         })
 }
@@ -786,15 +793,25 @@ mod tests {
     mod wayland_key_to_editor_key {
         use super::*;
 
-        /// Build a `keyboard::KeyEvent` with the given utf8 payload. The other fields are not used
-        /// by `wayland_key_to_editor_key`, so they get arbitrary values.
-        fn key_event(utf8: Option<&str>) -> keyboard::KeyEvent {
+        /// Build a `keyboard::KeyEvent` with the given utf8 payload and keysym. The remaining
+        /// fields are not used by `wayland_key_to_editor_key`, so they get arbitrary values.
+        fn key_event_with_keysym(
+            utf8: Option<&str>,
+            keysym: keyboard::Keysym,
+        ) -> keyboard::KeyEvent {
             keyboard::KeyEvent {
                 utf8: utf8.map(str::to_owned),
                 time: 0,
                 raw_code: 0,
-                keysym: keyboard::Keysym::Tab,
+                keysym,
             }
+        }
+
+        /// Build a `keyboard::KeyEvent` with the given utf8 payload. Uses an arbitrary keysym
+        /// (`Tab`) that `wayland_key_to_editor_key` does not treat specially, so translation is
+        /// driven purely by the utf8 payload.
+        fn key_event(utf8: Option<&str>) -> keyboard::KeyEvent {
+            key_event_with_keysym(utf8, keyboard::Keysym::Tab)
         }
 
         /// Build a `keyboard::Modifiers` with just the three flags we care about set.
@@ -826,7 +843,9 @@ mod tests {
             let ev = key_event(Some("a"));
             let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
                 .expect("expected a translated key");
-            let app::KeyCode::Char(ch) = got.key;
+            let app::KeyCode::Char(ch) = got.key else {
+                panic!("expected a Char key code");
+            };
             assert_eq!(ch, 'a');
             assert!(!got.modifiers.ctrl);
             assert!(!got.modifiers.alt);
@@ -838,7 +857,9 @@ mod tests {
             let ev = key_event(Some("x"));
             let got = wayland_key_to_editor_key(mods(true, true, true), &ev)
                 .expect("expected a translated key");
-            let app::KeyCode::Char(ch) = got.key;
+            let app::KeyCode::Char(ch) = got.key else {
+                panic!("expected a Char key code");
+            };
             assert_eq!(ch, 'x');
             assert!(got.modifiers.ctrl);
             assert!(got.modifiers.alt);
@@ -862,7 +883,9 @@ mod tests {
             let ev = key_event(Some("abc"));
             let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
                 .expect("expected a translated key");
-            let app::KeyCode::Char(ch) = got.key;
+            let app::KeyCode::Char(ch) = got.key else {
+                panic!("expected a Char key code");
+            };
             assert_eq!(ch, 'a');
         }
 
@@ -871,8 +894,49 @@ mod tests {
             let ev = key_event(Some("ñ"));
             let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
                 .expect("expected a translated key");
-            let app::KeyCode::Char(ch) = got.key;
+            let app::KeyCode::Char(ch) = got.key else {
+                panic!("expected a Char key code");
+            };
             assert_eq!(ch, 'ñ');
+        }
+
+        #[test]
+        fn test_backspace_keysym_maps_to_backspace() {
+            // The physical Backspace key delivers the BS control character as its utf8 payload,
+            // but it is identified by its keysym. It must be translated to the dedicated
+            // `Backspace` key code, not to a `Char`.
+            let ev = key_event_with_keysym(Some("\u{8}"), keyboard::Keysym::BackSpace);
+            let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
+                .expect("expected a translated key");
+            assert!(
+                matches!(got.key, app::KeyCode::Backspace),
+                "expected a Backspace key code"
+            );
+        }
+
+        #[test]
+        fn test_backspace_keysym_ignores_utf8_payload() {
+            // Even without any utf8 payload, the Backspace keysym alone must be translated to the
+            // dedicated `Backspace` key code (it does not depend on the utf8 field).
+            let ev = key_event_with_keysym(None, keyboard::Keysym::BackSpace);
+            let got = wayland_key_to_editor_key(keyboard::Modifiers::default(), &ev)
+                .expect("expected a translated key");
+            assert!(
+                matches!(got.key, app::KeyCode::Backspace),
+                "expected a Backspace key code"
+            );
+        }
+
+        #[test]
+        fn test_backspace_keysym_preserves_modifiers() {
+            // Modifiers held together with Backspace are copied through unchanged.
+            let ev = key_event_with_keysym(None, keyboard::Keysym::BackSpace);
+            let got = wayland_key_to_editor_key(mods(true, false, true), &ev)
+                .expect("expected a translated key");
+            assert!(matches!(got.key, app::KeyCode::Backspace));
+            assert!(got.modifiers.ctrl);
+            assert!(!got.modifiers.alt);
+            assert!(got.modifiers.shift);
         }
     }
 }
