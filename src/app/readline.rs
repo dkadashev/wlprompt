@@ -21,6 +21,13 @@ pub struct KeyPress {
     pub modifiers: Modifiers,
 }
 
+// The result of handling a key press. For now the only outcome is that the editor needs more
+// input, but later this will grow variants for e.g. "input finished" or "cancelled".
+#[derive(Debug, PartialEq)]
+pub enum HandleKeyResult {
+    MoreDataNeeded,
+}
+
 pub struct Editor {
     text: String, // LATER: this is probably not a great idea for perf reasons, but for now it'll do
 }
@@ -39,12 +46,13 @@ impl Editor {
 
     // For now this is very crude, just builds the string, no completion, no history, no hotkeys /
     // navigation / editing.
-    pub fn handle_key(&mut self, key: &KeyPress) -> &str {
+    #[must_use]
+    pub fn handle_key(&mut self, key: &KeyPress) -> HandleKeyResult {
         match keypress_to_action(key) {
             Action::AppendChar(ch) => self.text.push(ch),
             Action::NoOp => {}
         }
-        self.text.as_ref()
+        HandleKeyResult::MoreDataNeeded
     }
 
     pub fn current_text(&self) -> &str {
@@ -95,40 +103,66 @@ mod tests {
     #[test]
     fn test_basic_text_appended() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('h')), "h");
-        assert_eq!(e.handle_key(&key!('i')), "hi");
+        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "h");
+        assert_eq!(e.handle_key(&key!('i')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "hi");
     }
 
     #[test]
     fn test_unknown_combinations_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), "a");
-        assert_eq!(e.handle_key(&key!('b')), "ab");
-        assert_eq!(e.handle_key(&key!('c'; ctrl)), "ab");
-        assert_eq!(e.handle_key(&key!('c'; alt)), "ab");
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(
+            e.handle_key(&key!('c'; ctrl)),
+            HandleKeyResult::MoreDataNeeded
+        );
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(
+            e.handle_key(&key!('c'; alt)),
+            HandleKeyResult::MoreDataNeeded
+        );
+        assert_eq!(e.current_text(), "ab");
     }
 
     #[test]
     fn test_shift_not_filtered() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), "a");
-        assert_eq!(e.handle_key(&key!('B'; shift)), "aB");
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(
+            e.handle_key(&key!('B'; shift)),
+            HandleKeyResult::MoreDataNeeded
+        );
+        assert_eq!(e.current_text(), "aB");
     }
 
     #[test]
     fn test_multiple_modifiers_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), "a");
-        assert_eq!(e.handle_key(&key!('x'; ctrl, alt)), "a");
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(
+            e.handle_key(&key!('x'; ctrl, alt)),
+            HandleKeyResult::MoreDataNeeded
+        );
+        assert_eq!(e.current_text(), "a");
     }
 
     #[test]
     fn test_special_characters() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!(' ')), " ");
-        assert_eq!(e.handle_key(&key!('!')), " !");
-        assert_eq!(e.handle_key(&key!('ñ')), " !ñ");
-        assert_eq!(e.handle_key(&key!('日')), " !ñ日");
+        assert_eq!(e.handle_key(&key!(' ')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), " ");
+        assert_eq!(e.handle_key(&key!('!')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), " !");
+        assert_eq!(e.handle_key(&key!('ñ')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), " !ñ");
+        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), " !ñ日");
     }
 
     #[test]
@@ -140,16 +174,28 @@ mod tests {
     #[test]
     fn test_control_characters_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), "a");
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "a");
         // Keys like Enter, Tab, Escape and Backspace deliver a control character via utf8;
         // none of them must end up in the buffer.
-        assert_eq!(e.handle_key(&key!('\r')), "a"); // Enter / Return
-        assert_eq!(e.handle_key(&key!('\n')), "a"); // Line feed
-        assert_eq!(e.handle_key(&key!('\t')), "a"); // Tab
-        assert_eq!(e.handle_key(&key!('\u{1b}')), "a"); // Escape
-        assert_eq!(e.handle_key(&key!('\u{8}')), "a"); // Backspace
-        assert_eq!(e.handle_key(&key!('\u{7f}')), "a"); // Delete
+        assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::MoreDataNeeded); // Enter / Return
+        assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::MoreDataNeeded); // Line feed
+        assert_eq!(e.handle_key(&key!('\t')), HandleKeyResult::MoreDataNeeded); // Tab
+        assert_eq!(
+            e.handle_key(&key!('\u{1b}')),
+            HandleKeyResult::MoreDataNeeded
+        ); // Escape
+        assert_eq!(
+            e.handle_key(&key!('\u{8}')),
+            HandleKeyResult::MoreDataNeeded
+        ); // Backspace
+        assert_eq!(
+            e.handle_key(&key!('\u{7f}')),
+            HandleKeyResult::MoreDataNeeded
+        ); // Delete
+        assert_eq!(e.current_text(), "a");
         // Printable input still works afterwards.
-        assert_eq!(e.handle_key(&key!('b')), "ab");
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "ab");
     }
 }
