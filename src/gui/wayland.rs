@@ -665,6 +665,122 @@ mod tests {
         }
     }
 
+    mod combine_alpha {
+        use super::*;
+
+        #[test]
+        fn test_full_alpha_preserves_everything() {
+            // Multiplying by an alpha of 1.0 (255) is a no-op
+            let got = combine_alpha(Rgba::new(10, 20, 30, 200), 0xff);
+            assert_eq!((got.r, got.g, got.b, got.a), (10, 20, 30, 200));
+        }
+
+        #[test]
+        fn test_zero_alpha_clears_alpha_but_keeps_rgb() {
+            let got = combine_alpha(Rgba::new(10, 20, 30, 200), 0);
+            assert_eq!((got.r, got.g, got.b, got.a), (10, 20, 30, 0));
+        }
+
+        #[test]
+        fn test_half_alpha_on_opaque() {
+            // Opaque color at 50% additional alpha: 255 * 128 / 255 == 128.
+            let got = combine_alpha(Rgba::new(1, 2, 3, 0xff), 128);
+            assert_eq!((got.r, got.g, got.b, got.a), (1, 2, 3, 128));
+        }
+
+        #[test]
+        fn test_two_partial_alphas_multiply() {
+            // Existing alpha 128 scaled by additional alpha 128: 128 * 128 / 255 == 64
+            // (16384 / 255 == 64 after truncation).
+            let got = combine_alpha(Rgba::new(7, 8, 9, 128), 128);
+            assert_eq!((got.r, got.g, got.b, got.a), (7, 8, 9, 64));
+        }
+
+        #[test]
+        fn test_rgb_channels_are_never_modified() {
+            // Regardless of the additional alpha, RGB channels pass through unchanged.
+            for alpha in [0u8, 1, 64, 128, 200, 0xff] {
+                let got = combine_alpha(Rgba::new(11, 22, 33, 150), alpha);
+                assert_eq!((got.r, got.g, got.b), (11, 22, 33));
+            }
+        }
+    }
+
+    mod overlay_pixel {
+        use super::*;
+
+        // Pixels are in premultiplied ARGB8888 little-endian, i.e. the byte order is [B, G, R, A].
+
+        #[test]
+        fn test_opaque_foreground_replaces_background() {
+            // A fully opaque foreground takes the fast path and completely overwrites the
+            // background, regardless of what the background was.
+            let fg = [10, 20, 30, 0xff];
+            let mut bg = [100, 110, 120, 40];
+            overlay_pixel(&fg, &mut bg);
+            assert_eq!(bg, fg);
+        }
+
+        #[test]
+        fn test_transparent_foreground_leaves_background_unchanged() {
+            // A fully transparent foreground is all zeros once premultiplied, so it must not
+            // affect the background at all.
+            let fg = [0, 0, 0, 0];
+            let mut bg = [100, 110, 120, 200];
+            overlay_pixel(&fg, &mut bg);
+            assert_eq!(bg, [100, 110, 120, 200]);
+        }
+
+        #[test]
+        fn test_overlay_onto_empty_yields_foreground() {
+            // Overlaying onto a fully transparent (empty) background reproduces the foreground.
+            let fg = [100, 50, 25, 128];
+            let mut bg = [0, 0, 0, 0];
+            overlay_pixel(&fg, &mut bg);
+            assert_eq!(bg, [100, 50, 25, 128]);
+        }
+
+        #[test]
+        fn test_partial_over_opaque_blends_colors() {
+            // Half-transparent foreground over an opaque background. Worked example:
+            //   1 - a_fg == 255 - 128 == 127
+            //   b: 100 + (0   * 127 / 255) == 100
+            //   g:   0 + (0   * 127 / 255) == 0
+            //   r:   0 + (200 * 127 / 255) == 99   (25400 / 255 == 99 after truncation)
+            //   a: 128 + 255 - (128 * 255 / 255) == 255
+            let fg = [100, 0, 0, 128];
+            let mut bg = [0, 0, 200, 0xff];
+            overlay_pixel(&fg, &mut bg);
+            assert_eq!(bg, [100, 0, 99, 0xff]);
+        }
+
+        #[test]
+        fn test_partial_over_partial_accumulates_alpha() {
+            // Two half-transparent pixels combine following a_out = a_fg + a_bg * (1 - a_fg):
+            //   a: 128 + 128 - (128 * 128 / 255) == 256 - 64 == 192
+            let fg = [0, 0, 0, 128];
+            let mut bg = [0, 0, 0, 128];
+            overlay_pixel(&fg, &mut bg);
+            assert_eq!(bg, [0, 0, 0, 192]);
+        }
+
+        #[test]
+        #[should_panic(expected = "fg.len() == 4")]
+        fn test_wrong_foreground_length_panics() {
+            let fg = [0, 0, 0];
+            let mut bg = [0, 0, 0, 0];
+            overlay_pixel(&fg, &mut bg);
+        }
+
+        #[test]
+        #[should_panic(expected = "bg.len() == 4")]
+        fn test_wrong_background_length_panics() {
+            let fg = [0, 0, 0, 0];
+            let mut bg = [0, 0, 0];
+            overlay_pixel(&fg, &mut bg);
+        }
+    }
+
     mod wayland_key_to_editor_key {
         use super::*;
 
