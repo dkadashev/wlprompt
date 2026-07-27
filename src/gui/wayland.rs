@@ -26,24 +26,76 @@ use wayland_client::{
 
 use crate::app;
 
-/// Defines a color in RGBA color model without premultiplied alpha
-#[derive(Copy, Clone)]
-pub struct Rgba {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
+/// Color in the RGBA color space.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Color {
+    // The color is stored internally in ARGB8888 little-endian format (so, BGRA) with
+    // pre-multiplied alpha, for the efficiency reasons - since this is what we use the most. The
+    // outside code shouldn't worry about that though, this should be considered an implementation
+    // detail that is free to change.
+    bgra: [u8; 4],
 }
 
-impl Rgba {
-    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
-        Rgba { r, g, b, a }
+/// "Multiply" a color component by an alpha in 0-255 range. If alpha was in 0-1 range (floating
+/// point) then it'd be just a multiplication, but with 0-255 range we need a few type casts. Just
+/// a trivial helper to avoid converting everything to floating point numbers all the time.
+fn alpha_mul(c: u8, a: u8) -> u8 {
+    u8::try_from(u32::from(c) * u32::from(a) / 255).unwrap()
+}
+
+impl Color {
+    /// Construct a `Color` from rgba components, *without premultiplied alpha*.
+    pub fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self {
+            bgra: [alpha_mul(b, a), alpha_mul(g, a), alpha_mul(r, a), a],
+        }
+    }
+
+    /// Construct a `Color` from a little-endian ARGB8888 representation with pre-multiplied alpha.
+    pub fn from_argb_le_premul(bgra: [u8; 4]) -> Self {
+        Self { bgra }
+    }
+
+    /// Get the `Color` as a little-endian ARGB8888 representation with pre-multiplied alpha.
+    pub fn as_argb_le_premul(&self) -> &[u8; 4] {
+        &self.bgra
+    }
+
+    /// Overlay another color on top of this one (src-over)
+    pub fn overlay_other(self, fg: Color) -> Color {
+        if fg.bgra[3] == 255 {
+            return fg;
+        }
+        Color {
+            bgra: [
+                fg.bgra[0] + alpha_mul(self.bgra[0], 255 - fg.bgra[3]),
+                fg.bgra[1] + alpha_mul(self.bgra[1], 255 - fg.bgra[3]),
+                fg.bgra[2] + alpha_mul(self.bgra[2], 255 - fg.bgra[3]),
+                u8::try_from(
+                    u32::from(fg.bgra[3]) + u32::from(self.bgra[3])
+                        - u32::from(alpha_mul(fg.bgra[3], self.bgra[3])),
+                )
+                .unwrap(),
+            ],
+        }
+    }
+
+    /// Add "more transparency" to the color
+    pub fn add_alpha(self, alpha: u8) -> Color {
+        Color {
+            bgra: [
+                alpha_mul(self.bgra[0], alpha),
+                alpha_mul(self.bgra[1], alpha),
+                alpha_mul(self.bgra[2], alpha),
+                alpha_mul(self.bgra[3], alpha),
+            ],
+        }
     }
 }
 
 pub struct Config {
-    pub bg_color: Rgba,
-    pub text_color: Rgba,
+    pub bg_color: Color,
+    pub text_color: Color,
     pub text_margin: u8,
     pub font: String,
     pub font_size: u8,
@@ -85,7 +137,7 @@ struct SurfaceProperties {
     width: u32,
     height: u32,
     scale_factor: u32,
-    bg_color: [u8; 4],
+    bg_color: Color,
 }
 
 impl Default for SurfaceProperties {
@@ -94,7 +146,7 @@ impl Default for SurfaceProperties {
             width: 512,
             height: 25,
             scale_factor: 1,
-            bg_color: [0, 0, 0, 0xff],
+            bg_color: Color::from_rgba(0, 0, 0, 0xff),
         }
     }
 }
@@ -114,61 +166,13 @@ struct GuiState {
     surface: LayerSurface,
     kbd_state: KeyboardState,
 
-    text_color: Rgba,
+    text_color: Color,
     text_margin: u8,
     base_font_size: u8,
     text_renderer: super::text_renderer::TextRenderer,
     editor: app::Editor,
 
     done: bool,
-}
-
-/// "Multiply" a color component by an alpha in 0-255 range. If alpha was in 0-1 range (floating
-/// point) then it'd be just a multiplication, but with 0-255 range we need a few type casts. Just
-/// a trivial helper to avoid converting everything to floating point numbers all the time.
-fn u8_alpha_mul(c: u8, a: u8) -> u8 {
-    u8::try_from(u32::from(c) * u32::from(a) / 255).unwrap()
-}
-
-/// Convert RGBA color into ARGB8888 little-endian format *with premultiplied alpha* expected
-/// by DRM / wayland, see
-///
-/// * <https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_shm-enum-format>,
-/// * `drm_fourcc.h` in the Linux kernel tree
-/// * <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/pixfmt-rgb.html#bits-per-component>
-///
-/// The last one might seem irrelevant, since it's about V4L, but note that it says that the
-/// layout with AR24 code is BGRA.
-fn rgba_to_argb_le_premul(rgba: Rgba) -> [u8; 4] {
-    [
-        u8_alpha_mul(rgba.b, rgba.a),
-        u8_alpha_mul(rgba.g, rgba.a),
-        u8_alpha_mul(rgba.r, rgba.a),
-        rgba.a,
-    ]
-}
-
-/// Apply "additional" alpha to the color.
-fn combine_alpha(rgba: Rgba, alpha: u8) -> Rgba {
-    Rgba::new(rgba.r, rgba.g, rgba.b, u8_alpha_mul(rgba.a, alpha))
-}
-
-/// Overlay one pixel onto another (src-over). Both pixels must be in ARGB8888 little-endian with
-/// premultiplied alpha. The `bg` pixel is updated in place.
-/// See <https://en.wikipedia.org/wiki/Alpha_compositing>.
-fn overlay_pixel(fg: &[u8], bg: &mut [u8]) {
-    assert!(fg.len() == 4);
-    assert!(bg.len() == 4);
-    if fg[3] == 255 {
-        bg.copy_from_slice(fg);
-        return;
-    }
-    bg[0] = fg[0] + u8_alpha_mul(bg[0], 255 - fg[3]);
-    bg[1] = fg[1] + u8_alpha_mul(bg[1], 255 - fg[3]);
-    bg[2] = fg[2] + u8_alpha_mul(bg[2], 255 - fg[3]);
-    bg[3] =
-        u8::try_from(u32::from(fg[3]) + u32::from(bg[3]) - u32::from(u8_alpha_mul(fg[3], bg[3])))
-            .unwrap();
 }
 
 impl GuiState {
@@ -190,7 +194,7 @@ impl GuiState {
 
             surface_properties: SurfaceProperties {
                 height: cfg.height,
-                bg_color: rgba_to_argb_le_premul(cfg.bg_color),
+                bg_color: cfg.bg_color,
                 ..Default::default()
             },
             surface: prepare_surface(globals, qh)?,
@@ -225,7 +229,7 @@ impl GuiState {
             .expect("failed to get a buffer from the pool");
 
         for px in canvas.chunks_exact_mut(4) {
-            px.copy_from_slice(&self.surface_properties.bg_color);
+            px.copy_from_slice(self.surface_properties.bg_color.as_argb_le_premul());
         }
 
         let margin = u32::from(self.text_margin);
@@ -236,13 +240,18 @@ impl GuiState {
             .text_renderer
             .render(self.editor.current_text(), font_size)
         {
-            let text_color = rgba_to_argb_le_premul(combine_alpha(self.text_color, alpha));
             let linear_pos = (((y + margin) * width + x + margin) * 4) as usize;
             if linear_pos + 4 > canvas.len() {
                 // This can happen if the font is too large for the surface, or the text is too long
                 continue;
             }
-            overlay_pixel(&text_color, &mut canvas[linear_pos..linear_pos + 4]);
+            // There is a triple copy here (from canvas to Color, then to new Color, then back to
+            // canvas), hopefully the compiler will optimize them away. In any case we can worry
+            // about this later.
+            let text_color = self.text_color.add_alpha(alpha);
+            let pixel = canvas[linear_pos..linear_pos + 4].as_mut_array().unwrap();
+            let new_color = Color::from_argb_le_premul(*pixel).overlay_other(text_color);
+            pixel.copy_from_slice(new_color.as_argb_le_premul());
         }
 
         self.surface
@@ -610,183 +619,195 @@ fn prepare_surface(
 mod tests {
     use super::*;
 
-    mod rgba_to_argb_le_premul {
+    mod color {
         use super::*;
 
-        #[test]
-        fn test_opaque_preserves_channels_in_bgra_order() {
-            // With full alpha, premultiplication is a no-op, so this also verifies the output
-            // channel order is [B, G, R, A].
-            let got = rgba_to_argb_le_premul(Rgba::new(1, 2, 3, 0xff));
-            assert_eq!(got, [3, 2, 1, 0xff]);
-        }
+        mod from_rgba {
+            use super::*;
 
-        #[test]
-        fn test_fully_transparent_is_all_zero() {
-            // Alpha of 0 premultiplies every color channel down to 0.
-            let got = rgba_to_argb_le_premul(Rgba::new(10, 20, 30, 0));
-            assert_eq!(got, [0, 0, 0, 0]);
-        }
+            // `Color::from_rgba` premultiplies alpha and stores the result in ARGB8888 little-endian
+            // (BGRA) order; `as_argb_le_premul` exposes that raw representation for inspection.
 
-        #[test]
-        fn test_opaque_primary_colors() {
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0xff, 0, 0, 0xff)),
-                [0, 0, 0xff, 0xff]
-            );
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0, 0xff, 0, 0xff)),
-                [0, 0xff, 0, 0xff]
-            );
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0, 0, 0xff, 0xff)),
-                [0xff, 0, 0, 0xff]
-            );
-        }
+            #[test]
+            fn test_opaque_preserves_channels_in_bgra_order() {
+                // With full alpha, premultiplication is a no-op, so this also verifies the output
+                // channel order is [B, G, R, A].
+                let got = *Color::from_rgba(1, 2, 3, 0xff).as_argb_le_premul();
+                assert_eq!(got, [3, 2, 1, 0xff]);
+            }
 
-        #[test]
-        fn test_opaque_black_and_white() {
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0, 0, 0, 0xff)),
-                [0, 0, 0, 0xff]
-            );
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 0xff)),
-                [0xff, 0xff, 0xff, 0xff]
-            );
-        }
+            #[test]
+            fn test_fully_transparent_is_all_zero() {
+                // Alpha of 0 premultiplies every color channel down to 0.
+                let got = *Color::from_rgba(10, 20, 30, 0).as_argb_le_premul();
+                assert_eq!(got, [0, 0, 0, 0]);
+            }
 
-        #[test]
-        fn test_half_alpha_premultiplication() {
-            // White at 50% alpha: each channel becomes 255 * 128 / 255 == 128.
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(0xff, 0xff, 0xff, 128)),
-                [128, 128, 128, 128]
-            );
-            // Distinct channels at 50% alpha, checking both the math and the BGRA ordering:
-            //   b: 50  * 128 / 255 == 25
-            //   g: 100 * 128 / 255 == 50
-            //   r: 200 * 128 / 255 == 100
-            assert_eq!(
-                rgba_to_argb_le_premul(Rgba::new(200, 100, 50, 128)),
-                [25, 50, 100, 128]
-            );
-        }
-    }
+            #[test]
+            fn test_opaque_primary_colors() {
+                assert_eq!(
+                    *Color::from_rgba(0xff, 0, 0, 0xff).as_argb_le_premul(),
+                    [0, 0, 0xff, 0xff]
+                );
+                assert_eq!(
+                    *Color::from_rgba(0, 0xff, 0, 0xff).as_argb_le_premul(),
+                    [0, 0xff, 0, 0xff]
+                );
+                assert_eq!(
+                    *Color::from_rgba(0, 0, 0xff, 0xff).as_argb_le_premul(),
+                    [0xff, 0, 0, 0xff]
+                );
+            }
 
-    mod combine_alpha {
-        use super::*;
+            #[test]
+            fn test_opaque_black_and_white() {
+                assert_eq!(
+                    *Color::from_rgba(0, 0, 0, 0xff).as_argb_le_premul(),
+                    [0, 0, 0, 0xff]
+                );
+                assert_eq!(
+                    *Color::from_rgba(0xff, 0xff, 0xff, 0xff).as_argb_le_premul(),
+                    [0xff, 0xff, 0xff, 0xff]
+                );
+            }
 
-        #[test]
-        fn test_full_alpha_preserves_everything() {
-            // Multiplying by an alpha of 1.0 (255) is a no-op
-            let got = combine_alpha(Rgba::new(10, 20, 30, 200), 0xff);
-            assert_eq!((got.r, got.g, got.b, got.a), (10, 20, 30, 200));
-        }
+            #[test]
+            fn test_half_alpha_premultiplication() {
+                // White at 50% alpha: each channel becomes 255 * 128 / 255 == 128.
+                assert_eq!(
+                    *Color::from_rgba(0xff, 0xff, 0xff, 128).as_argb_le_premul(),
+                    [128, 128, 128, 128]
+                );
+                // Distinct channels at 50% alpha, checking both the math and the BGRA ordering:
+                //   b: 50  * 128 / 255 == 25
+                //   g: 100 * 128 / 255 == 50
+                //   r: 200 * 128 / 255 == 100
+                assert_eq!(
+                    *Color::from_rgba(200, 100, 50, 128).as_argb_le_premul(),
+                    [25, 50, 100, 128]
+                );
+            }
 
-        #[test]
-        fn test_zero_alpha_clears_alpha_but_keeps_rgb() {
-            let got = combine_alpha(Rgba::new(10, 20, 30, 200), 0);
-            assert_eq!((got.r, got.g, got.b, got.a), (10, 20, 30, 0));
-        }
-
-        #[test]
-        fn test_half_alpha_on_opaque() {
-            // Opaque color at 50% additional alpha: 255 * 128 / 255 == 128.
-            let got = combine_alpha(Rgba::new(1, 2, 3, 0xff), 128);
-            assert_eq!((got.r, got.g, got.b, got.a), (1, 2, 3, 128));
-        }
-
-        #[test]
-        fn test_two_partial_alphas_multiply() {
-            // Existing alpha 128 scaled by additional alpha 128: 128 * 128 / 255 == 64
-            // (16384 / 255 == 64 after truncation).
-            let got = combine_alpha(Rgba::new(7, 8, 9, 128), 128);
-            assert_eq!((got.r, got.g, got.b, got.a), (7, 8, 9, 64));
-        }
-
-        #[test]
-        fn test_rgb_channels_are_never_modified() {
-            // Regardless of the additional alpha, RGB channels pass through unchanged.
-            for alpha in [0u8, 1, 64, 128, 200, 0xff] {
-                let got = combine_alpha(Rgba::new(11, 22, 33, 150), alpha);
-                assert_eq!((got.r, got.g, got.b), (11, 22, 33));
+            #[test]
+            fn test_from_argb_le_premul_round_trips() {
+                // `from_argb_le_premul` stores the raw bytes verbatim, so `as_argb_le_premul` must
+                // return exactly what was put in.
+                let raw = [10, 20, 30, 200];
+                assert_eq!(*Color::from_argb_le_premul(raw).as_argb_le_premul(), raw);
             }
         }
-    }
 
-    mod overlay_pixel {
-        use super::*;
+        mod add_alpha {
+            use super::*;
 
-        // Pixels are in premultiplied ARGB8888 little-endian, i.e. the byte order is [B, G, R, A].
+            // `Color` stores premultiplied ARGB8888 little-endian (BGRA), so `add_alpha` scales every
+            // channel (including the already-premultiplied color channels) by the extra alpha.
+            // `Color` derives `PartialEq`/`Eq`, so we compare whole `Color`s directly rather than
+            // inspecting the raw byte representation.
 
-        #[test]
-        fn test_opaque_foreground_replaces_background() {
-            // A fully opaque foreground takes the fast path and completely overwrites the
-            // background, regardless of what the background was.
-            let fg = [10, 20, 30, 0xff];
-            let mut bg = [100, 110, 120, 40];
-            overlay_pixel(&fg, &mut bg);
-            assert_eq!(bg, fg);
+            #[test]
+            fn test_full_alpha_preserves_everything() {
+                // Multiplying by an alpha of 1.0 (255) is a no-op.
+                let color = Color::from_argb_le_premul([10, 20, 30, 200]);
+                assert_eq!(color.add_alpha(0xff), color);
+            }
+
+            #[test]
+            fn test_zero_alpha_clears_everything() {
+                // Because the stored channels are premultiplied, scaling by an alpha of 0 zeroes them
+                // all out, including the color channels.
+                let got = Color::from_argb_le_premul([10, 20, 30, 200]).add_alpha(0);
+                assert_eq!(got, Color::from_argb_le_premul([0, 0, 0, 0]));
+            }
+
+            #[test]
+            fn test_half_alpha_on_opaque() {
+                // Opaque pixel at 50% additional alpha: alpha 255 * 128 / 255 == 128, and each stored
+                // color channel is scaled likewise (e.g. 2 * 128 / 255 == 1, 4 -> 2, 6 -> 3).
+                let got = Color::from_argb_le_premul([2, 4, 6, 0xff]).add_alpha(128);
+                assert_eq!(got, Color::from_argb_le_premul([1, 2, 3, 128]));
+            }
+
+            #[test]
+            fn test_two_partial_alphas_multiply() {
+                // Every channel at 128 scaled by additional alpha 128: 128 * 128 / 255 == 64
+                // (16384 / 255 == 64 after truncation).
+                let got = Color::from_argb_le_premul([128, 128, 128, 128]).add_alpha(128);
+                assert_eq!(got, Color::from_argb_le_premul([64, 64, 64, 64]));
+            }
+
+            #[test]
+            fn test_scales_premultiplied_channels() {
+                // Start from an opaque rgba color, then add 50% transparency. The premultiplied BGRA of
+                // rgba(200, 100, 50, 255) is [50, 100, 200, 255]; scaling by 128 gives:
+                //   b: 50  * 128 / 255 == 25
+                //   g: 100 * 128 / 255 == 50
+                //   r: 200 * 128 / 255 == 100
+                //   a: 255 * 128 / 255 == 128
+                let got = Color::from_rgba(200, 100, 50, 0xff).add_alpha(128);
+                assert_eq!(got, Color::from_argb_le_premul([25, 50, 100, 128]));
+            }
         }
 
-        #[test]
-        fn test_transparent_foreground_leaves_background_unchanged() {
-            // A fully transparent foreground is all zeros once premultiplied, so it must not
-            // affect the background at all.
-            let fg = [0, 0, 0, 0];
-            let mut bg = [100, 110, 120, 200];
-            overlay_pixel(&fg, &mut bg);
-            assert_eq!(bg, [100, 110, 120, 200]);
-        }
+        mod overlay_other {
+            use super::*;
 
-        #[test]
-        fn test_overlay_onto_empty_yields_foreground() {
-            // Overlaying onto a fully transparent (empty) background reproduces the foreground.
-            let fg = [100, 50, 25, 128];
-            let mut bg = [0, 0, 0, 0];
-            overlay_pixel(&fg, &mut bg);
-            assert_eq!(bg, [100, 50, 25, 128]);
-        }
+            // Colors are stored as premultiplied ARGB8888 little-endian, i.e. the byte order is
+            // [B, G, R, A]. `bg.overlay_other(fg)` composites `fg` over `bg` (src-over). `Color`
+            // derives `PartialEq`/`Eq`, so we assert on whole `Color`s rather than their raw bytes.
 
-        #[test]
-        fn test_partial_over_opaque_blends_colors() {
-            // Half-transparent foreground over an opaque background. Worked example:
-            //   1 - a_fg == 255 - 128 == 127
-            //   b: 100 + (0   * 127 / 255) == 100
-            //   g:   0 + (0   * 127 / 255) == 0
-            //   r:   0 + (200 * 127 / 255) == 99   (25400 / 255 == 99 after truncation)
-            //   a: 128 + 255 - (128 * 255 / 255) == 255
-            let fg = [100, 0, 0, 128];
-            let mut bg = [0, 0, 200, 0xff];
-            overlay_pixel(&fg, &mut bg);
-            assert_eq!(bg, [100, 0, 99, 0xff]);
-        }
+            /// Build a `Color` from a raw premultiplied BGRA byte array.
+            fn color(bgra: [u8; 4]) -> Color {
+                Color::from_argb_le_premul(bgra)
+            }
 
-        #[test]
-        fn test_partial_over_partial_accumulates_alpha() {
-            // Two half-transparent pixels combine following a_out = a_fg + a_bg * (1 - a_fg):
-            //   a: 128 + 128 - (128 * 128 / 255) == 256 - 64 == 192
-            let fg = [0, 0, 0, 128];
-            let mut bg = [0, 0, 0, 128];
-            overlay_pixel(&fg, &mut bg);
-            assert_eq!(bg, [0, 0, 0, 192]);
-        }
+            #[test]
+            fn test_opaque_foreground_replaces_background() {
+                // A fully opaque foreground takes the fast path and completely overwrites the
+                // background, regardless of what the background was.
+                let fg = color([10, 20, 30, 0xff]);
+                let bg = color([100, 110, 120, 40]);
+                assert_eq!(bg.overlay_other(fg), fg);
+            }
 
-        #[test]
-        #[should_panic(expected = "fg.len() == 4")]
-        fn test_wrong_foreground_length_panics() {
-            let fg = [0, 0, 0];
-            let mut bg = [0, 0, 0, 0];
-            overlay_pixel(&fg, &mut bg);
-        }
+            #[test]
+            fn test_transparent_foreground_leaves_background_unchanged() {
+                // A fully transparent foreground is all zeros once premultiplied, so it must not
+                // affect the background at all.
+                let fg = color([0, 0, 0, 0]);
+                let bg = color([100, 110, 120, 200]);
+                assert_eq!(bg.overlay_other(fg), bg);
+            }
 
-        #[test]
-        #[should_panic(expected = "bg.len() == 4")]
-        fn test_wrong_background_length_panics() {
-            let fg = [0, 0, 0, 0];
-            let mut bg = [0, 0, 0];
-            overlay_pixel(&fg, &mut bg);
+            #[test]
+            fn test_overlay_onto_empty_yields_foreground() {
+                // Overlaying onto a fully transparent (empty) background reproduces the foreground.
+                let fg = color([100, 50, 25, 128]);
+                let bg = color([0, 0, 0, 0]);
+                assert_eq!(bg.overlay_other(fg), fg);
+            }
+
+            #[test]
+            fn test_partial_over_opaque_blends_colors() {
+                // Half-transparent foreground over an opaque background. Worked example:
+                //   1 - a_fg == 255 - 128 == 127
+                //   b: 100 + (0   * 127 / 255) == 100
+                //   g:   0 + (0   * 127 / 255) == 0
+                //   r:   0 + (200 * 127 / 255) == 99   (25400 / 255 == 99 after truncation)
+                //   a: 128 + 255 - (128 * 255 / 255) == 255
+                let fg = color([100, 0, 0, 128]);
+                let bg = color([0, 0, 200, 0xff]);
+                assert_eq!(bg.overlay_other(fg), color([100, 0, 99, 0xff]));
+            }
+
+            #[test]
+            fn test_partial_over_partial_accumulates_alpha() {
+                // Two half-transparent pixels combine following a_out = a_fg + a_bg * (1 - a_fg):
+                //   a: 128 + 128 - (128 * 128 / 255) == 256 - 64 == 192
+                let fg = color([0, 0, 0, 128]);
+                let bg = color([0, 0, 0, 128]);
+                assert_eq!(bg.overlay_other(fg), color([0, 0, 0, 192]));
+            }
         }
     }
 
