@@ -472,7 +472,7 @@ impl keyboard::KeyboardHandler for GuiState {
         }
         if let Some(event) = wayland_key_to_editor_key(self.kbd_state.modifiers, &event) {
             match self.editor.handle_key(&event) {
-                app::HandleKeyResult::MoreDataNeeded => {}
+                app::HandleKeyResult::MoreInputNeeded => {}
             }
             // LATER: we do not need to re-draw on every key press, only if something changed
             self.draw();

@@ -26,7 +26,7 @@ pub struct KeyPress {
 // input, but later this will grow variants for e.g. "input finished" or "cancelled".
 #[derive(Debug, PartialEq)]
 pub enum HandleKeyResult {
-    MoreDataNeeded,
+    MoreInputNeeded,
 }
 
 pub struct Editor {
@@ -55,7 +55,7 @@ impl Editor {
             }
             Action::NoOp => {}
         }
-        HandleKeyResult::MoreDataNeeded
+        HandleKeyResult::MoreInputNeeded
     }
 
     pub fn current_text(&self) -> &str {
@@ -133,27 +133,27 @@ mod tests {
     #[test]
     fn test_basic_text_appended() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "h");
-        assert_eq!(e.handle_key(&key!('i')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('i')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "hi");
     }
 
     #[test]
     fn test_unknown_combinations_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
             e.handle_key(&key!('c'; ctrl)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
             e.handle_key(&key!('c'; alt)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "ab");
     }
@@ -161,11 +161,11 @@ mod tests {
     #[test]
     fn test_shift_not_filtered() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
         assert_eq!(
             e.handle_key(&key!('B'; shift)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "aB");
     }
@@ -173,11 +173,11 @@ mod tests {
     #[test]
     fn test_multiple_modifiers_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
         assert_eq!(
             e.handle_key(&key!('x'; ctrl, alt)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
     }
@@ -185,13 +185,13 @@ mod tests {
     #[test]
     fn test_special_characters() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!(' ')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!(' ')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), " ");
-        assert_eq!(e.handle_key(&key!('!')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('!')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), " !");
-        assert_eq!(e.handle_key(&key!('ñ')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('ñ')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), " !ñ");
-        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), " !ñ日");
     }
 
@@ -204,25 +204,25 @@ mod tests {
     #[test]
     fn test_control_characters_ignored() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
         // Keys like Enter, Tab, Escape and Delete deliver a control character via utf8; none of
         // them must end up in the buffer. (The BS control character `\u{8}` is deliberately
         // excluded here: it is handled as backspace, see `test_bs_control_char_acts_as_backspace`.)
-        assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::MoreDataNeeded); // Enter / Return
-        assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::MoreDataNeeded); // Line feed
-        assert_eq!(e.handle_key(&key!('\t')), HandleKeyResult::MoreDataNeeded); // Tab
+        assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::MoreInputNeeded); // Enter / Return
+        assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::MoreInputNeeded); // Line feed
+        assert_eq!(e.handle_key(&key!('\t')), HandleKeyResult::MoreInputNeeded); // Tab
         assert_eq!(
             e.handle_key(&key!('\u{1b}')),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         ); // Escape
         assert_eq!(
             e.handle_key(&key!('\u{7f}')),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         ); // Delete
         assert_eq!(e.current_text(), "a");
         // Printable input still works afterwards.
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
     }
 
@@ -231,17 +231,17 @@ mod tests {
         // The BS control character (`\u{8}`) delivered as a `Char` must delete the last character,
         // just like the dedicated Backspace key.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
             e.handle_key(&key!('\u{8}')),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
         assert_eq!(
             e.handle_key(&key!('\u{8}')),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "");
     }
@@ -252,7 +252,7 @@ mod tests {
         let mut e = Editor::new();
         assert_eq!(
             e.handle_key(&key!('\u{8}')),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "");
     }
@@ -260,12 +260,18 @@ mod tests {
     #[test]
     fn test_backspace_key_removes_last_char() {
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
-        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(
+            e.handle_key(&backspace!()),
+            HandleKeyResult::MoreInputNeeded
+        );
         assert_eq!(e.current_text(), "a");
-        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(
+            e.handle_key(&backspace!()),
+            HandleKeyResult::MoreInputNeeded
+        );
         assert_eq!(e.current_text(), "");
     }
 
@@ -273,7 +279,10 @@ mod tests {
     fn test_backspace_on_empty_is_noop() {
         // Backspacing an empty buffer must not panic and must leave it empty.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(
+            e.handle_key(&backspace!()),
+            HandleKeyResult::MoreInputNeeded
+        );
         assert_eq!(e.current_text(), "");
     }
 
@@ -281,10 +290,13 @@ mod tests {
     fn test_backspace_removes_multibyte_char() {
         // `String::pop()` removes a whole char, so multi-byte scalars are removed in one press.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a日");
-        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(
+            e.handle_key(&backspace!()),
+            HandleKeyResult::MoreInputNeeded
+        );
         assert_eq!(e.current_text(), "a");
     }
 
@@ -292,12 +304,12 @@ mod tests {
     fn test_ctrl_h_acts_as_backspace() {
         // Ctrl+H is the traditional terminal binding for backspace.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
             e.handle_key(&key!('h'; ctrl)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
     }
@@ -306,8 +318,8 @@ mod tests {
     fn test_plain_h_is_inserted() {
         // Without ctrl, 'h' is an ordinary character and must be inserted, not treated as backspace.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ah");
     }
 
@@ -315,10 +327,10 @@ mod tests {
     fn test_ctrl_alt_h_is_not_backspace() {
         // Ctrl+Alt+H is a different combination and must not delete anything.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(
             e.handle_key(&key!('h'; ctrl, alt)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
     }
@@ -327,12 +339,12 @@ mod tests {
     fn test_backspace_with_modifiers_still_deletes() {
         // The dedicated Backspace key deletes regardless of modifiers held alongside it.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
             e.handle_key(&backspace!(shift)),
-            HandleKeyResult::MoreDataNeeded
+            HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
     }
@@ -341,13 +353,16 @@ mod tests {
     fn test_append_backspace_append() {
         // Test that append works correctly after backspace
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
-        assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "abd");
-        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(
+            e.handle_key(&backspace!()),
+            HandleKeyResult::MoreInputNeeded
+        );
         assert_eq!(e.current_text(), "ab");
-        assert_eq!(e.handle_key(&key!('c')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('c')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "abc");
     }
 }
