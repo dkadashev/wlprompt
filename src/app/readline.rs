@@ -336,4 +336,18 @@ mod tests {
         );
         assert_eq!(e.current_text(), "a");
     }
+
+    #[test]
+    fn test_append_backspace_append() {
+        // Test that append works correctly after backspace
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "abd");
+        assert_eq!(e.handle_key(&backspace!()), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(e.handle_key(&key!('c')), HandleKeyResult::MoreDataNeeded);
+        assert_eq!(e.current_text(), "abc");
+    }
 }
