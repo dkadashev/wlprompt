@@ -104,7 +104,7 @@ struct GuiState {
     text_margin: u8,
     base_font_size: u8,
     text_renderer: super::text_renderer::TextRenderer,
-    editor: app::Editor,
+    app_layer: app::App,
 
     done: bool,
 }
@@ -141,7 +141,7 @@ impl GuiState {
             text_margin: cfg.text_margin,
             base_font_size: cfg.font_size,
             text_renderer: super::text_renderer::TextRenderer::new(&cfg.font)?,
-            editor: app::Editor::new(),
+            app_layer: app::App::new(),
 
             done: false,
         })
@@ -172,7 +172,7 @@ impl GuiState {
             (u32::from(self.base_font_size) * self.surface_properties.scale_factor) as f32;
         for (x, y, alpha) in self
             .text_renderer
-            .render(self.editor.current_text(), font_size)
+            .render(self.app_layer.current_text(), font_size)
         {
             let linear_pos = (((y + margin) * width + x + margin) * 4) as usize;
             if linear_pos + 4 > canvas.len() {
@@ -471,7 +471,7 @@ impl keyboard::KeyboardHandler for GuiState {
             self.done = true;
         }
         if let Some(event) = wayland_key_to_editor_key(self.kbd_state.modifiers, &event) {
-            match self.editor.handle_key(&event) {
+            match self.app_layer.handle_key(&event) {
                 app::HandleKeyResult::MoreInputNeeded => {}
             }
             // LATER: we do not need to re-draw on every key press, only if something changed
