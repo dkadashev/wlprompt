@@ -16,6 +16,7 @@ pub enum KeyCode {
     Char(char),
     Backspace,
     Escape,
+    Enter,
 }
 
 pub struct KeyPress {
@@ -29,6 +30,7 @@ pub struct KeyPress {
 pub enum HandleKeyResult {
     MoreInputNeeded,
     Cancel,
+    Done,
 }
 
 pub struct Editor {
@@ -59,6 +61,9 @@ impl Editor {
                 return HandleKeyResult::Cancel;
             }
             Action::NoOp => {}
+            Action::Done => {
+                return HandleKeyResult::Done;
+            }
         }
         HandleKeyResult::MoreInputNeeded
     }
@@ -73,6 +78,7 @@ enum Action {
     AppendChar(char),
     Backspace,
     Cancel,
+    Done,
 }
 
 fn keypress_to_action(kp: &KeyPress) -> Action {
@@ -80,6 +86,7 @@ fn keypress_to_action(kp: &KeyPress) -> Action {
         // The dedicated Backspace key always means backspace, regardless of modifiers.
         KeyCode::Backspace => Action::Backspace,
         KeyCode::Escape => Action::Cancel,
+        KeyCode::Enter => Action::Done,
         KeyCode::Char(ch) => {
             // Ctrl+H is the traditional terminal binding for backspace, so treat it exactly like
             // the dedicated Backspace key. This must be checked before the generic ctrl/alt
@@ -99,6 +106,14 @@ fn keypress_to_action(kp: &KeyPress) -> Action {
             // Escape
             if ch == '\u{1b}' {
                 return Action::Cancel;
+            }
+            // Ctrl+M is a terminal key binding for Enter
+            if kp.modifiers.ctrl && !kp.modifiers.alt && ch == 'm' {
+                return Action::Done;
+            }
+            // '\r' or \'n' is often emitted when Enter or Ctrl+M is hit
+            if ch == '\r' || ch == '\n' {
+                return Action::Done;
             }
             if kp.modifiers.ctrl || kp.modifiers.alt {
                 return Action::NoOp;
@@ -154,6 +169,19 @@ mod tests {
                     ..Modifiers::default()
                 },
                 key: KeyCode::Escape,
+            }
+        };
+    }
+
+    /// Build a `KeyPress` carrying the dedicated `Enter` key code, optionally with modifiers.
+    macro_rules! enter {
+        ($( $mod:ident ),*) => {
+            KeyPress {
+                modifiers: Modifiers{
+                    $($mod: true,)*
+                    ..Modifiers::default()
+                },
+                key: KeyCode::Enter,
             }
         };
     }
@@ -234,10 +262,12 @@ mod tests {
         let mut e = Editor::new();
         assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
-        // Keys like Enter, Tab and Delete deliver a control character via utf8; none of them must
-        // end up in the buffer.
-        assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::MoreInputNeeded); // Enter / Return
-        assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::MoreInputNeeded); // Line feed
+        // Keys like Tab and Delete deliver a control character via utf8; none of them must end up
+        // in the buffer. Several control characters are deliberately excluded here because they
+        // have dedicated handling: the BS char `\u{8}` acts as backspace (see
+        // `test_bs_control_char_acts_as_backspace`), the Escape char `\u{1b}` cancels (see
+        // `test_escape_control_char_cancels`), and the CR/LF chars `\r`/`\n` finish input (see
+        // `test_cr_control_char_is_done` / `test_lf_control_char_is_done`).
         assert_eq!(e.handle_key(&key!('\t')), HandleKeyResult::MoreInputNeeded); // Tab
         assert_eq!(
             e.handle_key(&key!('\u{7f}')),
@@ -338,6 +368,98 @@ mod tests {
         // Cancelling an empty buffer must work and must not panic.
         let mut e = Editor::new();
         assert_eq!(e.handle_key(&key!('\u{3}')), HandleKeyResult::Cancel);
+        assert_eq!(e.current_text(), "");
+    }
+
+    #[test]
+    fn test_enter_key_is_done() {
+        // The dedicated Enter key finishes input.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
+    }
+
+    #[test]
+    fn test_enter_key_is_done_with_text() {
+        // Enter finishes input regardless of what has already been typed, and it must not mutate
+        // the buffer so the caller can read the final text.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
+        assert_eq!(e.current_text(), "ab");
+    }
+
+    #[test]
+    fn test_enter_key_is_done_with_modifiers() {
+        // The dedicated Enter key finishes input regardless of modifiers held alongside it.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&enter!(ctrl)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&enter!(alt)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&enter!(shift)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&enter!(ctrl, alt)), HandleKeyResult::Done);
+    }
+
+    #[test]
+    fn test_ctrl_m_is_done() {
+        // Ctrl+M is the traditional terminal binding for Enter and must finish input.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('m'; ctrl)), HandleKeyResult::Done);
+        // The buffer is left untouched so the caller can read the final text.
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_ctrl_alt_m_is_not_done() {
+        // Ctrl+Alt+M is a different combination and must not finish input; it is discarded as an
+        // unknown shortcut.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(
+            e.handle_key(&key!('m'; ctrl, alt)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_plain_m_is_inserted() {
+        // Without ctrl, 'm' is an ordinary character and must be inserted, not treated as Enter.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('m')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "am");
+    }
+
+    #[test]
+    fn test_cr_control_char_is_done() {
+        // The CR control character (`\r`), often emitted when Enter is hit, finishes input and
+        // must not be inserted into the buffer.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::Done);
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_lf_control_char_is_done() {
+        // The LF control character (`\n`), often emitted when Enter is hit, finishes input and
+        // must not be inserted into the buffer.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::Done);
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_enter_key_is_done_on_empty() {
+        // Finishing input on an empty buffer must work and must not panic.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
         assert_eq!(e.current_text(), "");
     }
 

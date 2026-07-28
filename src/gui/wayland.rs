@@ -223,6 +223,12 @@ fn wayland_key_to_editor_key(
             key: app::KeyCode::Escape,
         });
     }
+    if key.keysym == keyboard::Keysym::Return {
+        return Some(app::KeyPress {
+            modifiers: app_modifiers,
+            key: app::KeyCode::Enter,
+        });
+    }
     key.utf8
         .as_deref()
         .and_then(|s| s.chars().next())
