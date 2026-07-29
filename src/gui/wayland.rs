@@ -217,6 +217,12 @@ fn wayland_key_to_editor_key(
             key: app::KeyCode::Backspace,
         });
     }
+    if key.keysym == keyboard::Keysym::Escape {
+        return Some(app::KeyPress {
+            modifiers: app_modifiers,
+            key: app::KeyCode::Escape,
+        });
+    }
     key.utf8
         .as_deref()
         .and_then(|s| s.chars().next())
@@ -467,15 +473,15 @@ impl keyboard::KeyboardHandler for GuiState {
         event: keyboard::KeyEvent,
     ) {
         trace!(kbd:?, event:?; "KeyboardHandler::press_key");
-        if event.keysym == keyboard::Keysym::Escape {
-            self.done = true;
-        }
         if let Some(event) = wayland_key_to_editor_key(self.kbd_state.modifiers, &event) {
             match self.app_layer.handle_key(&event) {
-                app::HandleKeyResult::MoreInputNeeded => {}
+                app::HandleKeyResult::MoreInputNeeded => {
+                    self.draw();
+                }
+                app::HandleKeyResult::Exit => {
+                    self.done = true;
+                }
             }
-            // LATER: we do not need to re-draw on every key press, only if something changed
-            self.draw();
         }
     }
 

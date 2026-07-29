@@ -15,6 +15,7 @@ pub struct Modifiers {
 pub enum KeyCode {
     Char(char),
     Backspace,
+    Escape,
 }
 
 pub struct KeyPress {
@@ -27,6 +28,7 @@ pub struct KeyPress {
 #[derive(Debug, PartialEq)]
 pub enum HandleKeyResult {
     MoreInputNeeded,
+    Cancel,
 }
 
 pub struct Editor {
@@ -53,6 +55,9 @@ impl Editor {
             Action::Backspace => {
                 self.text.pop();
             }
+            Action::Cancel => {
+                return HandleKeyResult::Cancel;
+            }
             Action::NoOp => {}
         }
         HandleKeyResult::MoreInputNeeded
@@ -67,12 +72,14 @@ enum Action {
     NoOp,
     AppendChar(char),
     Backspace,
+    Cancel,
 }
 
 fn keypress_to_action(kp: &KeyPress) -> Action {
     match kp.key {
         // The dedicated Backspace key always means backspace, regardless of modifiers.
         KeyCode::Backspace => Action::Backspace,
+        KeyCode::Escape => Action::Cancel,
         KeyCode::Char(ch) => {
             // Ctrl+H is the traditional terminal binding for backspace, so treat it exactly like
             // the dedicated Backspace key. This must be checked before the generic ctrl/alt
@@ -81,9 +88,17 @@ fn keypress_to_action(kp: &KeyPress) -> Action {
             if kp.modifiers.ctrl && !kp.modifiers.alt && ch == 'h' {
                 return Action::Backspace;
             }
-            // The `\u{8}` char also means backspace
+            // Backspace
             if ch == '\u{8}' {
                 return Action::Backspace;
+            }
+            // Ctrl-C
+            if ch == '\u{3}' {
+                return Action::Cancel;
+            }
+            // Escape
+            if ch == '\u{1b}' {
+                return Action::Cancel;
             }
             if kp.modifiers.ctrl || kp.modifiers.alt {
                 return Action::NoOp;
@@ -126,6 +141,19 @@ mod tests {
                     ..Modifiers::default()
                 },
                 key: KeyCode::Backspace,
+            }
+        };
+    }
+
+    /// Build a `KeyPress` carrying the dedicated `Escape` key code, optionally with modifiers.
+    macro_rules! escape {
+        ($( $mod:ident ),*) => {
+            KeyPress {
+                modifiers: Modifiers{
+                    $($mod: true,)*
+                    ..Modifiers::default()
+                },
+                key: KeyCode::Escape,
             }
         };
     }
@@ -206,16 +234,11 @@ mod tests {
         let mut e = Editor::new();
         assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a");
-        // Keys like Enter, Tab, Escape and Delete deliver a control character via utf8; none of
-        // them must end up in the buffer. (The BS control character `\u{8}` is deliberately
-        // excluded here: it is handled as backspace, see `test_bs_control_char_acts_as_backspace`.)
+        // Keys like Enter, Tab and Delete deliver a control character via utf8; none of them must
+        // end up in the buffer.
         assert_eq!(e.handle_key(&key!('\r')), HandleKeyResult::MoreInputNeeded); // Enter / Return
         assert_eq!(e.handle_key(&key!('\n')), HandleKeyResult::MoreInputNeeded); // Line feed
         assert_eq!(e.handle_key(&key!('\t')), HandleKeyResult::MoreInputNeeded); // Tab
-        assert_eq!(
-            e.handle_key(&key!('\u{1b}')),
-            HandleKeyResult::MoreInputNeeded
-        ); // Escape
         assert_eq!(
             e.handle_key(&key!('\u{7f}')),
             HandleKeyResult::MoreInputNeeded
@@ -254,6 +277,67 @@ mod tests {
             e.handle_key(&key!('\u{8}')),
             HandleKeyResult::MoreInputNeeded
         );
+        assert_eq!(e.current_text(), "");
+    }
+
+    #[test]
+    fn test_escape_key_cancels() {
+        // The dedicated Escape key requests cancellation.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&escape!()), HandleKeyResult::Cancel);
+    }
+
+    #[test]
+    fn test_escape_key_cancels_with_text() {
+        // Escape cancels regardless of what has already been typed, and it must not mutate the
+        // buffer.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(e.handle_key(&escape!()), HandleKeyResult::Cancel);
+        assert_eq!(e.current_text(), "ab");
+    }
+
+    #[test]
+    fn test_escape_key_cancels_with_modifiers() {
+        // The dedicated Escape key cancels regardless of modifiers held alongside it.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&escape!(ctrl)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&escape!(alt)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&escape!(shift)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&escape!(ctrl, alt)), HandleKeyResult::Cancel);
+    }
+
+    #[test]
+    fn test_escape_control_char_cancels() {
+        // The Escape control character (`\u{1b}`) delivered as a `Char` must request cancellation,
+        // just like the dedicated Escape key.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('\u{1b}')), HandleKeyResult::Cancel);
+        // The buffer is left untouched by the cancel request.
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_ctrl_c_control_char_cancels() {
+        // Ctrl-C is delivered as the ETX control character (`\u{3}`) and must request
+        // cancellation.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(e.handle_key(&key!('\u{3}')), HandleKeyResult::Cancel);
+        // The buffer is left untouched by the cancel request.
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_ctrl_c_control_char_cancels_on_empty() {
+        // Cancelling an empty buffer must work and must not panic.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('\u{3}')), HandleKeyResult::Cancel);
         assert_eq!(e.current_text(), "");
     }
 

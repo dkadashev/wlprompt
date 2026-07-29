@@ -7,6 +7,7 @@ pub use readline::{KeyCode, KeyPress, Modifiers};
 
 pub enum HandleKeyResult {
     MoreInputNeeded,
+    Exit,
 }
 
 pub struct App {
@@ -23,6 +24,7 @@ impl App {
     pub fn handle_key(&mut self, key: &KeyPress) -> HandleKeyResult {
         match self.editor.handle_key(key) {
             readline::HandleKeyResult::MoreInputNeeded => HandleKeyResult::MoreInputNeeded,
+            readline::HandleKeyResult::Cancel => HandleKeyResult::Exit,
         }
     }
 
