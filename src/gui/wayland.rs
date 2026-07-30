@@ -211,31 +211,20 @@ fn wayland_key_to_editor_key(
         alt: modifiers.alt,
         shift: modifiers.shift,
     };
-    if key.keysym == keyboard::Keysym::BackSpace {
-        return Some(app::KeyPress {
-            modifiers: app_modifiers,
-            key: app::KeyCode::Backspace,
-        });
-    }
-    if key.keysym == keyboard::Keysym::Escape {
-        return Some(app::KeyPress {
-            modifiers: app_modifiers,
-            key: app::KeyCode::Escape,
-        });
-    }
-    if key.keysym == keyboard::Keysym::Return {
-        return Some(app::KeyPress {
-            modifiers: app_modifiers,
-            key: app::KeyCode::Enter,
-        });
-    }
-    key.utf8
-        .as_deref()
-        .and_then(|s| s.chars().next())
-        .map(|ch| app::KeyPress {
-            modifiers: app_modifiers,
-            key: app::KeyCode::Char(ch),
-        })
+    let key = match key.keysym {
+        keyboard::Keysym::BackSpace => Some(app::KeyCode::Backspace),
+        keyboard::Keysym::Escape => Some(app::KeyCode::Escape),
+        keyboard::Keysym::Return => Some(app::KeyCode::Enter),
+        _ => key
+            .utf8
+            .as_deref()
+            .and_then(|s| s.chars().next())
+            .map(app::KeyCode::Char),
+    };
+    key.map(|key| app::KeyPress {
+        modifiers: app_modifiers,
+        key,
+    })
 }
 
 // ---------------------------------------------------------------------------------
