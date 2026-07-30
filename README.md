@@ -27,5 +27,5 @@ Everything else is not a goal, so the feature list is likely to be quite minimal
 LATER: make this more human-friendly, for now this is mainly to catch the system level deps.
 
 1. Install cargo: https://doc.rust-lang.org/cargo/getting-started/installation.html;
-2. Install system level dependencies: `xkbcommon-dev`;
+2. Install system level dependencies: `xkbcommon-dev`, `libfontconfig-dev`;
 3. Run `cargo build`;
