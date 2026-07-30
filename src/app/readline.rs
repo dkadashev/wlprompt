@@ -135,8 +135,8 @@ mod tests {
     use super::*;
 
     macro_rules! key {
-        ($ch:expr) => { key!($ch; ) };
-        ($ch:expr; $( $mod:ident ),*) => {
+        ($ch:literal) => { key!($ch; ) };
+        ($ch:literal; $( $mod:ident ),*) => {
             KeyPress {
                 modifiers: Modifiers{
                     $($mod: true,)*
@@ -145,43 +145,14 @@ mod tests {
                 key: KeyCode::Char($ch),
             }
         };
-    }
-
-    /// Build a `KeyPress` carrying the dedicated `Backspace` key code, optionally with modifiers.
-    macro_rules! backspace {
-        ($( $mod:ident ),*) => {
+        ($code:ident) => { key!($code; ) };
+        ($code:ident; $( $mod:ident ),*) => {
             KeyPress {
                 modifiers: Modifiers{
                     $($mod: true,)*
                     ..Modifiers::default()
                 },
-                key: KeyCode::Backspace,
-            }
-        };
-    }
-
-    /// Build a `KeyPress` carrying the dedicated `Escape` key code, optionally with modifiers.
-    macro_rules! escape {
-        ($( $mod:ident ),*) => {
-            KeyPress {
-                modifiers: Modifiers{
-                    $($mod: true,)*
-                    ..Modifiers::default()
-                },
-                key: KeyCode::Escape,
-            }
-        };
-    }
-
-    /// Build a `KeyPress` carrying the dedicated `Enter` key code, optionally with modifiers.
-    macro_rules! enter {
-        ($( $mod:ident ),*) => {
-            KeyPress {
-                modifiers: Modifiers{
-                    $($mod: true,)*
-                    ..Modifiers::default()
-                },
-                key: KeyCode::Enter,
+                key: KeyCode::$code,
             }
         };
     }
@@ -314,7 +285,7 @@ mod tests {
     fn test_escape_key_cancels() {
         // The dedicated Escape key requests cancellation.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&escape!()), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&key!(Escape)), HandleKeyResult::Cancel);
     }
 
     #[test]
@@ -325,7 +296,7 @@ mod tests {
         assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
-        assert_eq!(e.handle_key(&escape!()), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&key!(Escape)), HandleKeyResult::Cancel);
         assert_eq!(e.current_text(), "ab");
     }
 
@@ -333,10 +304,13 @@ mod tests {
     fn test_escape_key_cancels_with_modifiers() {
         // The dedicated Escape key cancels regardless of modifiers held alongside it.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&escape!(ctrl)), HandleKeyResult::Cancel);
-        assert_eq!(e.handle_key(&escape!(alt)), HandleKeyResult::Cancel);
-        assert_eq!(e.handle_key(&escape!(shift)), HandleKeyResult::Cancel);
-        assert_eq!(e.handle_key(&escape!(ctrl, alt)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&key!(Escape; ctrl)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&key!(Escape; alt)), HandleKeyResult::Cancel);
+        assert_eq!(e.handle_key(&key!(Escape; shift)), HandleKeyResult::Cancel);
+        assert_eq!(
+            e.handle_key(&key!(Escape; ctrl, alt)),
+            HandleKeyResult::Cancel
+        );
     }
 
     #[test]
@@ -375,7 +349,7 @@ mod tests {
     fn test_enter_key_is_done() {
         // The dedicated Enter key finishes input.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter)), HandleKeyResult::Done);
     }
 
     #[test]
@@ -386,7 +360,7 @@ mod tests {
         assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
-        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter)), HandleKeyResult::Done);
         assert_eq!(e.current_text(), "ab");
     }
 
@@ -394,10 +368,10 @@ mod tests {
     fn test_enter_key_is_done_with_modifiers() {
         // The dedicated Enter key finishes input regardless of modifiers held alongside it.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&enter!(ctrl)), HandleKeyResult::Done);
-        assert_eq!(e.handle_key(&enter!(alt)), HandleKeyResult::Done);
-        assert_eq!(e.handle_key(&enter!(shift)), HandleKeyResult::Done);
-        assert_eq!(e.handle_key(&enter!(ctrl, alt)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter; ctrl)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter; alt)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter; shift)), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter; ctrl, alt)), HandleKeyResult::Done);
     }
 
     #[test]
@@ -459,7 +433,7 @@ mod tests {
     fn test_enter_key_is_done_on_empty() {
         // Finishing input on an empty buffer must work and must not panic.
         let mut e = Editor::new();
-        assert_eq!(e.handle_key(&enter!()), HandleKeyResult::Done);
+        assert_eq!(e.handle_key(&key!(Enter)), HandleKeyResult::Done);
         assert_eq!(e.current_text(), "");
     }
 
@@ -470,12 +444,12 @@ mod tests {
         assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
-            e.handle_key(&backspace!()),
+            e.handle_key(&key!(Backspace)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
         assert_eq!(
-            e.handle_key(&backspace!()),
+            e.handle_key(&key!(Backspace)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "");
@@ -486,7 +460,7 @@ mod tests {
         // Backspacing an empty buffer must not panic and must leave it empty.
         let mut e = Editor::new();
         assert_eq!(
-            e.handle_key(&backspace!()),
+            e.handle_key(&key!(Backspace)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "");
@@ -500,7 +474,7 @@ mod tests {
         assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "a日");
         assert_eq!(
-            e.handle_key(&backspace!()),
+            e.handle_key(&key!(Backspace)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
@@ -549,7 +523,7 @@ mod tests {
         assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "ab");
         assert_eq!(
-            e.handle_key(&backspace!(shift)),
+            e.handle_key(&key!(Backspace; shift)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "a");
@@ -564,7 +538,7 @@ mod tests {
         assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreInputNeeded);
         assert_eq!(e.current_text(), "abd");
         assert_eq!(
-            e.handle_key(&backspace!()),
+            e.handle_key(&key!(Backspace)),
             HandleKeyResult::MoreInputNeeded
         );
         assert_eq!(e.current_text(), "ab");
