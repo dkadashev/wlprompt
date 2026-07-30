@@ -1,0 +1,39 @@
+name: General CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install deps
+      run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev pkgconf libxkbcommon-dev
+    - name: Format
+      run: cargo fmt --check
+    - name: Clippy
+      run: cargo clippy --all-targets
+    - name: Test
+      run: cargo test
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile:
+          - dev
+          - release
+
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install deps
+      run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev pkgconf libxkbcommon-dev
+    - name: Build
+      run: cargo build --profile ${{ matrix.profile }}
