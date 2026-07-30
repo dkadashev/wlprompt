@@ -214,7 +214,7 @@ fn wayland_key_to_editor_key(
     let key = match key.keysym {
         keyboard::Keysym::BackSpace => Some(app::KeyCode::Backspace),
         keyboard::Keysym::Escape => Some(app::KeyCode::Escape),
-        keyboard::Keysym::Return => Some(app::KeyCode::Enter),
+        keyboard::Keysym::Return | keyboard::Keysym::KP_Enter => Some(app::KeyCode::Enter),
         _ => key
             .utf8
             .as_deref()
