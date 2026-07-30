@@ -282,6 +282,115 @@ mod tests {
     }
 
     #[test]
+    fn test_backspace_key_removes_last_char() {
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(
+            e.handle_key(&key!(Backspace)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+        assert_eq!(
+            e.handle_key(&key!(Backspace)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "");
+    }
+
+    #[test]
+    fn test_backspace_on_empty_is_noop() {
+        // Backspacing an empty buffer must not panic and must leave it empty.
+        let mut e = Editor::new();
+        assert_eq!(
+            e.handle_key(&key!(Backspace)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "");
+    }
+
+    #[test]
+    fn test_backspace_removes_multibyte_char() {
+        // `String::pop()` removes a whole char, so multi-byte scalars are removed in one press.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "a日");
+        assert_eq!(
+            e.handle_key(&key!(Backspace)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_ctrl_h_acts_as_backspace() {
+        // Ctrl+H is the traditional terminal binding for backspace.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(
+            e.handle_key(&key!('h'; ctrl)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_plain_h_is_inserted() {
+        // Without ctrl, 'h' is an ordinary character and must be inserted, not treated as backspace.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ah");
+    }
+
+    #[test]
+    fn test_ctrl_alt_h_is_not_backspace() {
+        // Ctrl+Alt+H is a different combination and must not delete anything.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(
+            e.handle_key(&key!('h'; ctrl, alt)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_backspace_with_modifiers_still_deletes() {
+        // The dedicated Backspace key deletes regardless of modifiers held alongside it.
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(
+            e.handle_key(&key!(Backspace; shift)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "a");
+    }
+
+    #[test]
+    fn test_append_backspace_append() {
+        // Test that append works correctly after backspace
+        let mut e = Editor::new();
+        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "abd");
+        assert_eq!(
+            e.handle_key(&key!(Backspace)),
+            HandleKeyResult::MoreInputNeeded
+        );
+        assert_eq!(e.current_text(), "ab");
+        assert_eq!(e.handle_key(&key!('c')), HandleKeyResult::MoreInputNeeded);
+        assert_eq!(e.current_text(), "abc");
+    }
+
+    #[test]
     fn test_escape_key_cancels() {
         // The dedicated Escape key requests cancellation.
         let mut e = Editor::new();
@@ -435,114 +544,5 @@ mod tests {
         let mut e = Editor::new();
         assert_eq!(e.handle_key(&key!(Enter)), HandleKeyResult::Done);
         assert_eq!(e.current_text(), "");
-    }
-
-    #[test]
-    fn test_backspace_key_removes_last_char() {
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "ab");
-        assert_eq!(
-            e.handle_key(&key!(Backspace)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "a");
-        assert_eq!(
-            e.handle_key(&key!(Backspace)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "");
-    }
-
-    #[test]
-    fn test_backspace_on_empty_is_noop() {
-        // Backspacing an empty buffer must not panic and must leave it empty.
-        let mut e = Editor::new();
-        assert_eq!(
-            e.handle_key(&key!(Backspace)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "");
-    }
-
-    #[test]
-    fn test_backspace_removes_multibyte_char() {
-        // `String::pop()` removes a whole char, so multi-byte scalars are removed in one press.
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('日')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "a日");
-        assert_eq!(
-            e.handle_key(&key!(Backspace)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "a");
-    }
-
-    #[test]
-    fn test_ctrl_h_acts_as_backspace() {
-        // Ctrl+H is the traditional terminal binding for backspace.
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "ab");
-        assert_eq!(
-            e.handle_key(&key!('h'; ctrl)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "a");
-    }
-
-    #[test]
-    fn test_plain_h_is_inserted() {
-        // Without ctrl, 'h' is an ordinary character and must be inserted, not treated as backspace.
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('h')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "ah");
-    }
-
-    #[test]
-    fn test_ctrl_alt_h_is_not_backspace() {
-        // Ctrl+Alt+H is a different combination and must not delete anything.
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(
-            e.handle_key(&key!('h'; ctrl, alt)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "a");
-    }
-
-    #[test]
-    fn test_backspace_with_modifiers_still_deletes() {
-        // The dedicated Backspace key deletes regardless of modifiers held alongside it.
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "ab");
-        assert_eq!(
-            e.handle_key(&key!(Backspace; shift)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "a");
-    }
-
-    #[test]
-    fn test_append_backspace_append() {
-        // Test that append works correctly after backspace
-        let mut e = Editor::new();
-        assert_eq!(e.handle_key(&key!('a')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('b')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.handle_key(&key!('d')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "abd");
-        assert_eq!(
-            e.handle_key(&key!(Backspace)),
-            HandleKeyResult::MoreInputNeeded
-        );
-        assert_eq!(e.current_text(), "ab");
-        assert_eq!(e.handle_key(&key!('c')), HandleKeyResult::MoreInputNeeded);
-        assert_eq!(e.current_text(), "abc");
     }
 }
