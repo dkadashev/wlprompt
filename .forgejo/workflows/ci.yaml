@@ -1,0 +1,54 @@
+name: CI
+on: [push]
+jobs:
+  lint:
+    runs-on: codeberg-tiny-lazy
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install rustfmt & clippy
+        run: rustup component add rustfmt clippy
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev pkgconf libxkbcommon-dev
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+  test:
+    runs-on: codeberg-tiny-lazy
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install rustfmt & clippy
+        run: rustup component add rustfmt clippy
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev pkgconf libxkbcommon-dev
+      - name: Test
+        run: cargo test
+  build:
+    runs-on: codeberg-small-lazy
+    strategy:
+      matrix:
+        profile:
+          - dev
+          - release
+
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev pkgconf libxkbcommon-dev
+      - name: Build
+        run: cargo build --profile ${{ matrix.profile }}
